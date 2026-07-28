@@ -13,6 +13,26 @@ let auth: Auth | null = null;
 const TEST_APP_PREFIX = 'connection_test_';
 
 /**
+ * /__/auth/* 를 Firebase 로 프록시하는 Pages Function 이 배포된 호스트 목록.
+ * 이 호스트에서는 authDomain 을 자기 자신으로 바꿔 인증 전 과정을 동일 출처로 만든다.
+ *
+ * 이유: 앱과 authDomain 의 출처가 다르면 Google 인증을 마치고 돌아온 /__/auth/handler 가
+ * 원래 창으로 결과를 넘길 때 브라우저의 서드파티 저장소 차단에 막혀 팝업이 백지로 멈춘다.
+ *
+ * 새 호스트를 추가하려면 Google Cloud Console 의 OAuth 클라이언트에
+ * https://<호스트>/__/auth/handler 를 승인된 리디렉션 URI 로 먼저 등록해야 한다.
+ */
+const SAME_ORIGIN_AUTH_HOSTS = ['classroom-role-app.pages.dev'];
+
+const resolveAuthDomain = (config: FirebaseConfig): string => {
+  if (typeof window !== 'undefined' && SAME_ORIGIN_AUTH_HOSTS.includes(window.location.hostname)) {
+    return window.location.hostname;
+  }
+  // localhost 및 그 외 호스트는 Firebase 기본 authDomain 을 그대로 사용한다.
+  return config.authDomain;
+};
+
+/**
  * 설정값이 바뀌면 앱 이름도 바뀌도록 결정론적 키를 만든다.
  * 예전 구현은 getApps()[0] 을 무조건 재사용해서, 교사가 자기 Firebase 정보를 새로 입력해도
  * 계속 이전 프로젝트에 기록되는 버그가 있었다.
@@ -22,7 +42,7 @@ const configKey = (config: FirebaseConfig): string =>
 
 const toSdkConfig = (config: FirebaseConfig) => ({
   apiKey: config.apiKey,
-  authDomain: config.authDomain,
+  authDomain: resolveAuthDomain(config),
   projectId: config.projectId,
   storageBucket: config.storageBucket,
   messagingSenderId: config.messagingSenderId,
