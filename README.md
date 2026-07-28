@@ -19,11 +19,13 @@ npm run build    # tsc + vite build -> dist/
 (`users/{uid}/classrooms/{classroomId}`)에만 기록하도록 되어 있지만, 서버 측에서도 이를 강제하려면
 [`firestore.rules`](./firestore.rules)를 반드시 배포해야 합니다.
 
-Firebase 콘솔 → Firestore Database → **규칙** 탭에 `firestore.rules` 내용을 붙여넣고 게시하거나:
+`firebase.json` / `.firebaserc`가 프로젝트(`role-project-7de1a`)를 가리키고 있으므로 아래 한 줄이면 됩니다:
 
 ```bash
-firebase deploy --only firestore:rules
+npx firebase-tools deploy --only firestore:rules
 ```
+
+Firebase 콘솔 → Firestore Database → **규칙** 탭에 `firestore.rules` 내용을 직접 붙여넣어 게시해도 됩니다.
 
 ### 구버전(v1) 데이터 정리
 
@@ -45,12 +47,22 @@ JSON 백업에는 Firebase 접속 정보가 포함되지 않습니다(악성 백
 
 ## 배포
 
-`main` 브랜치에 push하면 Cloudflare Pages가 자동 빌드합니다.
-수동 배포가 필요한 경우:
+Cloudflare Pages 프로젝트 `classroom-role-app`은 **Git 연동이 되어 있지 않습니다.**
+GitHub에 push해도 자동 빌드되지 않으므로, 배포는 항상 아래 두 단계를 직접 실행해야 합니다.
 
 ```bash
-npm run build
-npx wrangler pages deploy dist --project-name=classroom-role-app
+git push origin main                                   # 1) 소스 반영
+npm run build && npx wrangler pages deploy dist \
+  --project-name=classroom-role-app --branch=main      # 2) 실제 배포
 ```
 
-SPA 라우팅을 위해 `public/_redirects`가 `/* /index.html 200`을 포함합니다.
+- SPA 라우팅을 위해 `public/_redirects`가 `/* /index.html 200`을 포함합니다.
+- 프로젝트 루트의 `functions/__/auth/[[path]].js`는 배포 시 Functions 번들로 함께 올라갑니다.
+  (Google 로그인을 동일 출처로 만들어 주는 프록시이므로 반드시 저장소 루트에서 배포할 것)
+
+### 배포 후 점검
+
+```bash
+curl -s https://classroom-role-app.pages.dev/ | grep -o 'assets/index-[^"]*'  # 새 번들 반영 확인
+curl -s -o /dev/null -w '%{http_code}\n' https://classroom-role-app.pages.dev/__/auth/handler  # 200 이어야 함
+```
