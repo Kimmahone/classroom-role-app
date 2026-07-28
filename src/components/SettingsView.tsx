@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Student, Role, RolePreset, FirebaseConfig, ActivityCategory, ACTIVITY_CATEGORIES } from '../types';
+import { Student, Role, RolePreset, FirebaseConfig, ActivityCategory, ACTIVITY_CATEGORIES, SyncState, UserProfile } from '../types';
 import { BUILTIN_ROLE_PRESETS, exportDataToJson, importDataFromJson } from '../utils/storage';
 import { RoleIcon, AVAILABLE_ICONS } from './RoleIcon';
 import { soundFx } from '../utils/sound';
-import { 
-  Users, Briefcase, Download, Upload, Plus, Trash2, Edit, Sparkles, BookOpen, Layers, Cloud, X 
+import {
+  Users, Briefcase, Download, Upload, Plus, Trash2, Edit, Sparkles, BookOpen, Layers, Cloud, X,
+  ShieldAlert, LogIn, ShieldCheck
 } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -13,6 +14,10 @@ interface SettingsViewProps {
   customPresets: RolePreset[];
   firebaseConfig: FirebaseConfig;
   activeCategory: ActivityCategory;
+  syncState: SyncState;
+  syncError: string | null;
+  userProfile: UserProfile | null;
+  onLoginGoogle: () => void;
   onUpdateStudents: (students: Student[]) => void;
   onUpdateRoles: (roles: Role[]) => void;
   onUpdateCustomPresets: (presets: RolePreset[]) => void;
@@ -27,6 +32,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   customPresets,
   firebaseConfig,
   activeCategory,
+  syncState,
+  syncError,
+  userProfile,
+  onLoginGoogle,
   onUpdateStudents,
   onUpdateRoles,
   onUpdateCustomPresets,
@@ -83,7 +92,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   const handleDeleteStudent = (id: string) => {
-    if (confirm('해당 학생을 삭제하시겠습니까?')) {
+    const target = students.find((s) => s.id === id);
+    if (confirm(`${target?.name || '해당 학생'} 학생을 삭제합니다.\n이 학생의 역할 배정, 완수 체크, 역할 이력도 함께 삭제됩니다.`)) {
       soundFx.playClick();
       onUpdateStudents(students.filter((s) => s.id !== id));
     }
@@ -125,17 +135,38 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   const handleLoadPreset = (preset: RolePreset) => {
-    if (confirm(`'${preset.name}' 템플릿을 적용하시겠습니까? 기존 역할 목록에 병합/교체됩니다.`)) {
-      soundFx.playSuccess();
-      const loadedRoles: Role[] = preset.roles.map((r, idx) => ({
-        ...r,
-        id: `r_preset_${idx}_${Date.now()}`,
-        activityCategory: preset.activityCategory || 'daily',
-      }));
+    const targetCategory: ActivityCategory = preset.activityCategory || 'daily';
+    const categoryName = ACTIVITY_CATEGORIES.find((c) => c.id === targetCategory)?.name || '1인 1역';
 
-      const otherRoles = roles.filter((r) => r.activityCategory !== (preset.activityCategory || 'daily'));
-      onUpdateRoles([...otherRoles, ...loadedRoles]);
-    }
+    const existingInCategory = roles.filter((r) => (r.activityCategory || 'daily') === targetCategory);
+    // 이름이 같은 역할은 기존 ID 를 재사용해서, 이미 배정된 학생들이 '미배정'으로 떨어지지 않게 한다.
+    const idByTitle = new Map(existingInCategory.map((r) => [r.title.trim(), r.id]));
+    const reusableCount = preset.roles.filter((r) => idByTitle.has(r.title.trim())).length;
+
+    const lines = [
+      `'${preset.name}' 템플릿을 [${categoryName}] 범주에 적용합니다.`,
+      '',
+      `· 기존 역할 ${existingInCategory.length}종 → 템플릿 ${preset.roles.length}종으로 교체`,
+      reusableCount > 0
+        ? `· 이름이 같은 역할 ${reusableCount}종은 기존 배정이 그대로 유지됩니다.`
+        : '· 이름이 겹치는 역할이 없어 이 범주의 기존 배정은 해제됩니다.',
+      '',
+      '계속하시겠습니까?',
+    ];
+
+    if (!confirm(lines.join('\n'))) return;
+
+    soundFx.playSuccess();
+    const usedIds = new Set<string>();
+    const loadedRoles: Role[] = preset.roles.map((r, idx) => {
+      const reuseId = idByTitle.get(r.title.trim());
+      const id = reuseId && !usedIds.has(reuseId) ? reuseId : `r_${preset.id}_${idx}_${Date.now()}`;
+      usedIds.add(id);
+      return { ...r, id, activityCategory: targetCategory };
+    });
+
+    const otherRoles = roles.filter((r) => (r.activityCategory || 'daily') !== targetCategory);
+    onUpdateRoles([...otherRoles, ...loadedRoles]);
   };
 
   const handleDeleteCustomPreset = (id: string) => {
@@ -162,16 +193,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (!confirm('백업 파일의 내용으로 현재 학생 명단·역할·기록을 덮어씁니다.\n계속하시겠습니까?')) {
+      e.target.value = '';
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (evt) => {
       const content = evt.target?.result as string;
-      if (content && importDataFromJson(content)) {
+      const result = content
+        ? importDataFromJson(content)
+        : { success: false, message: '파일을 읽을 수 없습니다.', imported: [] };
+
+      if (result.success) {
         soundFx.playSuccess();
-        alert('데이터 복원이 성공적으로 완료되었습니다!');
         onRefreshData();
-      } else {
-        alert('올바르지 않은 JSON 백업 파일 형식입니다.');
       }
+      alert(result.message);
+      e.target.value = '';
+    };
+    reader.onerror = () => {
+      alert('파일을 읽는 중 오류가 발생했습니다.');
+      e.target.value = '';
     };
     reader.readAsText(file);
   };
@@ -308,7 +351,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               {students.length > 0 && (
                 <button
                   onClick={() => {
-                    if (confirm('전체 학생 명단을 삭제하시겠습니까?')) {
+                    if (confirm(`학생 ${students.length}명 전체를 삭제합니다.\n모든 역할 배정, 완수 체크, 역할 이력이 함께 삭제되며 되돌릴 수 없습니다.\n\n계속하시겠습니까?`)) {
                       onUpdateStudents([]);
                     }
                   }}
@@ -631,21 +674,73 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </button>
           </div>
 
+          {/* 개인정보 보호 안내 */}
+          <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex gap-3">
+            <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+            <div className="text-xs text-emerald-100/90 space-y-1">
+              <p className="font-bold text-emerald-300">학급 데이터는 선생님 계정에만 저장됩니다</p>
+              <p className="text-emerald-100/70 leading-relaxed">
+                학생 이름이 포함된 데이터는 Google 로그인 후 <span className="font-mono">users/{'{내 계정}'}/classrooms/</span> 경로에만
+                기록되며, 다른 사용자는 접근할 수 없습니다. 로그인하지 않으면 이 기기에만 저장됩니다.
+              </p>
+            </div>
+          </div>
+
+          {/* 로그인 필요 경고 */}
+          {syncState === 'needs-login' && (
+            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/40 flex flex-col sm:flex-row sm:items-center gap-3">
+              <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0" />
+              <p className="text-xs text-amber-100/90 flex-1">
+                클라우드 동기화가 켜져 있지만 <b>로그인하지 않아 저장되지 않고 있습니다.</b> Google 로그인을 해주세요.
+              </p>
+              <button
+                onClick={onLoginGoogle}
+                className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs transition shrink-0"
+              >
+                <LogIn className="w-3.5 h-3.5" /> 구글 로그인
+              </button>
+            </div>
+          )}
+
+          {syncState === 'error' && syncError && (
+            <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/40 text-xs text-rose-200">
+              <b className="text-rose-300">동기화 오류:</b> {syncError}
+            </div>
+          )}
+
           <div className="p-4 rounded-2xl bg-slate-800/60 border border-slate-800 space-y-3">
-            <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center justify-between text-xs gap-3">
               <span className="font-bold text-slate-400">현재 연동 상태:</span>
-              <span className={`font-bold px-2.5 py-1 rounded-full ${
-                firebaseConfig.enabled && firebaseConfig.apiKey 
+              <span className={`font-bold px-2.5 py-1 rounded-full text-right ${
+                syncState === 'idle' || syncState === 'saving'
                   ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                  : 'bg-slate-800 text-slate-400'
+                  : syncState === 'needs-login' || syncState === 'error'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                    : 'bg-slate-800 text-slate-400'
               }`}>
-                {firebaseConfig.enabled && firebaseConfig.apiKey ? '⚡️ 연결됨 (Cloud Sync ON)' : '💾 미연동 (Local Storage ON)'}
+                {syncState === 'off' && '💾 로컬 전용 (이 기기에만 저장)'}
+                {syncState === 'needs-login' && '🔒 로그인 필요 — 저장되지 않음'}
+                {syncState === 'saving' && '⏫ 클라우드 저장 중...'}
+                {syncState === 'idle' && '⚡️ 실시간 동기화 중'}
+                {syncState === 'error' && '⚠️ 동기화 오류'}
               </span>
             </div>
 
-            <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center justify-between text-xs gap-3">
+              <span className="font-bold text-slate-400">로그인 계정:</span>
+              <span className="font-mono text-indigo-300 truncate">
+                {userProfile?.email || userProfile?.displayName || '로그인하지 않음'}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between text-xs gap-3">
               <span className="font-bold text-slate-400">학급 고유 ID (Classroom ID):</span>
               <span className="font-mono text-indigo-300">{firebaseConfig.classroomId || '미지정'}</span>
+            </div>
+
+            <div className="flex items-center justify-between text-xs gap-3">
+              <span className="font-bold text-slate-400">Firebase 프로젝트:</span>
+              <span className="font-mono text-indigo-300 truncate">{firebaseConfig.projectId || '미지정'}</span>
             </div>
           </div>
         </div>
@@ -661,7 +756,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
               <div>
                 <h4 className="text-lg font-bold text-white">통합 JSON 데이터 백업 다운로드</h4>
-                <p className="text-xs text-slate-400">학생 명단, 역할 목록, 커스텀 템플릿, 활동별 체크 이력을 JSON 파일로 보관합니다.</p>
+                <p className="text-xs text-slate-400">
+                  학생 명단, 역할 목록, 커스텀 템플릿, 활동별 체크 이력, 역할 배정 이력을 JSON 파일로 보관합니다.
+                  <span className="block mt-1 text-slate-500">보안을 위해 Firebase 접속 정보는 백업에 포함되지 않습니다.</span>
+                </p>
               </div>
             </div>
             <button

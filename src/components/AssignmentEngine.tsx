@@ -1,14 +1,16 @@
-import React, { useState } from 'react';
-import { Student, Role, Assignment, ActivityCategory, ACTIVITY_CATEGORIES } from '../types';
+import React, { useState, useMemo } from 'react';
+import { Student, Role, Assignment, ActivityCategory, ACTIVITY_CATEGORIES, RoleHistoryRecord } from '../types';
 import { RoleIcon } from './RoleIcon';
 import { soundFx } from '../utils/sound';
 import confetti from 'canvas-confetti';
-import { Shuffle, RotateCw, Pin, PinOff, Lock, Trash2, UserCheck } from 'lucide-react';
+import { Shuffle, RotateCw, Pin, PinOff, Lock, Trash2, UserCheck, Scale } from 'lucide-react';
+import { buildRoleSlots, buildFairnessIndex, assignSlotsFairly } from '../utils/assignment';
 
 interface AssignmentEngineProps {
   students: Student[];
   roles: Role[];
   assignments: Assignment[];
+  roleHistory: RoleHistoryRecord[];
   activeCategory: ActivityCategory;
   onUpdateAssignments: (newAssignments: Assignment[]) => void;
 }
@@ -17,14 +19,23 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
   students,
   roles,
   assignments,
+  roleHistory,
   activeCategory,
   onUpdateAssignments,
 }) => {
   const [isShuffling, setIsShuffling] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+  const [useFairMode, setUseFairMode] = useState(true);
 
   const categoryConfig = ACTIVITY_CATEGORIES.find((c) => c.id === activeCategory) || ACTIVITY_CATEGORIES[0];
   const categoryRoles = roles.filter((r) => !r.activityCategory || r.activityCategory === activeCategory);
+
+  // --- 이력 기반 공정성 지표 -------------------------------------------------
+  const fairnessIndex = useMemo(
+    () => buildFairnessIndex(roleHistory, activeCategory),
+    [roleHistory, activeCategory]
+  );
+  const { timesHeld, sessionCount } = fairnessIndex;
 
   // Map assignments for current category
   const categoryAssignments = assignments.filter(
@@ -49,60 +60,43 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
     onUpdateAssignments(nextAssignments);
   };
 
+  /** 다른 활동 범주의 배정은 절대 건드리지 않는다. */
+  const otherCategoryAssignments = assignments.filter(
+    (a) => a.activityCategory && a.activityCategory !== activeCategory
+  );
+
   // Random Shuffle Engine for active category
   const handleRandomShuffle = () => {
     if (students.length === 0 || categoryRoles.length === 0) return;
     soundFx.playClick();
     setIsShuffling(true);
 
-    const rolePool: string[] = [];
-    categoryRoles.forEach((r) => {
-      for (let i = 0; i < (r.count || 1); i++) {
-        rolePool.push(r.id);
-      }
-    });
-
-    let poolIdx = 0;
-    while (rolePool.length < students.length && categoryRoles.length > 0) {
-      rolePool.push(categoryRoles[poolIdx % categoryRoles.length].id);
-      poolIdx++;
-    }
-
     setTimeout(() => {
-      const lockedStudents = new Set<string>();
-      const usedRoles: string[] = [];
+      const lockedStudents = students.filter((st) => assignmentMap.get(st.id)?.locked);
+      const unlockedStudents = students.filter((st) => !assignmentMap.get(st.id)?.locked);
 
-      categoryAssignments.forEach((a) => {
-        if (a.locked) {
-          lockedStudents.add(a.studentId);
-          usedRoles.push(a.roleId);
-        }
+      const slots = buildRoleSlots(categoryRoles, students.length);
+
+      // 고정된 학생이 이미 차지한 자리는 후보 목록에서 하나씩 뺀다.
+      const availableSlots = [...slots];
+      lockedStudents.forEach((st) => {
+        const roleId = assignmentMap.get(st.id)?.roleId;
+        if (!roleId) return;
+        const idx = availableSlots.indexOf(roleId);
+        if (idx !== -1) availableSlots.splice(idx, 1);
       });
 
-      const availableRoles = [...rolePool];
-      usedRoles.forEach((rId) => {
-        const idx = availableRoles.indexOf(rId);
-        if (idx !== -1) availableRoles.splice(idx, 1);
-      });
+      const picked = assignSlotsFairly(unlockedStudents, availableSlots, fairnessIndex, useFairMode);
 
-      for (let i = availableRoles.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [availableRoles[i], availableRoles[j]] = [availableRoles[j], availableRoles[i]];
-      }
-
-      let availIdx = 0;
       const newCategoryAssignments: Assignment[] = students.map((st) => {
         const existing = assignmentMap.get(st.id);
-        if (existing && existing.locked) {
+        if (existing?.locked) {
           return { studentId: st.id, roleId: existing.roleId, activityCategory: activeCategory, locked: true };
         }
-        const assignedRoleId = availableRoles[availIdx % availableRoles.length] || categoryRoles[0].id;
-        availIdx++;
+        const assignedRoleId = picked.get(st.id) || existing?.roleId || categoryRoles[0].id;
         return { studentId: st.id, roleId: assignedRoleId, activityCategory: activeCategory, locked: false };
       });
 
-      // Preserve assignments of OTHER categories!
-      const otherCategoryAssignments = assignments.filter((a) => a.activityCategory && a.activityCategory !== activeCategory);
       onUpdateAssignments([...otherCategoryAssignments, ...newCategoryAssignments]);
 
       setIsShuffling(false);
@@ -120,19 +114,16 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
 
     const newCategoryAssignments: Assignment[] = students.map((st) => {
       const existing = assignmentMap.get(st.id);
-      if (existing && existing.locked) {
+      if (existing?.locked) {
         return { studentId: st.id, roleId: existing.roleId, activityCategory: activeCategory, locked: true };
       }
-      if (!existing) {
-        return { studentId: st.id, roleId: roleIds[0], activityCategory: activeCategory };
-      }
 
-      const currIdx = roleIds.indexOf(existing.roleId);
-      const nextRoleId = roleIds[(currIdx + 1) % roleIds.length];
+      const currIdx = existing ? roleIds.indexOf(existing.roleId) : -1;
+      // 아직 배정이 없거나(-1) 이 범주에 없는 역할을 갖고 있으면 첫 역할부터 시작한다.
+      const nextRoleId = currIdx === -1 ? roleIds[0] : roleIds[(currIdx + 1) % roleIds.length];
       return { studentId: st.id, roleId: nextRoleId, activityCategory: activeCategory, locked: false };
     });
 
-    const otherCategoryAssignments = assignments.filter((a) => a.activityCategory && a.activityCategory !== activeCategory);
     onUpdateAssignments([...otherCategoryAssignments, ...newCategoryAssignments]);
     soundFx.playSuccess();
   };
@@ -140,11 +131,12 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
   // Manual Assign
   const handleManualAssign = (studentId: string, roleId: string) => {
     soundFx.playClick();
-    const otherCategoryAssignments = assignments.filter(
+    // 이 학생의 '현재 범주' 배정만 교체하고 나머지는 그대로 둔다.
+    const retained = assignments.filter(
       (a) => a.studentId !== studentId || (a.activityCategory && a.activityCategory !== activeCategory)
     );
     const updated: Assignment = { studentId, roleId, activityCategory: activeCategory };
-    onUpdateAssignments([...otherCategoryAssignments, updated]);
+    onUpdateAssignments([...retained, updated]);
     setSelectedStudentId(null);
   };
 
@@ -175,6 +167,33 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
             <p className="text-sm text-slate-400">
               선택된 범주의 역할({categoryRoles.length}종)에 맞추어 랜덤 셔플 및 순환 배정을 진행합니다.
             </p>
+
+            {/* 이력 기반 공정 배정 토글 */}
+            <button
+              type="button"
+              onClick={() => {
+                soundFx.playClick();
+                setUseFairMode((v) => !v);
+              }}
+              aria-pressed={useFairMode}
+              className={`mt-3 inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold border transition ${
+                useFairMode
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
+              }`}
+              title="지난 배정 이력을 반영해 같은 역할이 반복되지 않도록 합니다."
+            >
+              <Scale className="w-4 h-4" />
+              <span>
+                {useFairMode ? '이력 반영 공정 배정 ON' : '완전 무작위 배정'}
+                {useFairMode && sessionCount > 0 && ` · 누적 ${sessionCount}회차 반영`}
+              </span>
+            </button>
+            {useFairMode && sessionCount === 0 && (
+              <p className="text-[11px] text-slate-500 mt-1.5">
+                아직 저장된 배정 이력이 없습니다. 첫 배정을 실행하면 다음 회차부터 반복을 피해 배정합니다.
+              </p>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
@@ -227,6 +246,8 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
               const current = assignmentMap.get(student.id);
               const assignedRole = current ? categoryRoles.find((r) => r.id === current.roleId) : null;
               const isSelected = selectedStudentId === student.id;
+              // 이 학생이 지금 역할을 과거에 몇 번 맡았는지 (오늘 기록 포함)
+              const heldCount = current ? timesHeld.get(`${student.id}|${current.roleId}`) || 0 : 0;
 
               return (
                 <div
@@ -250,6 +271,14 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
                       <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-800 text-xs font-bold text-indigo-300 border border-slate-700">
                         <RoleIcon name={assignedRole.icon} className="w-3.5 h-3.5" />
                         <span>{assignedRole.title}</span>
+                        {heldCount > 1 && (
+                          <span
+                            className="px-1.5 rounded-md bg-amber-500/20 text-amber-300 text-[10px]"
+                            title={`이 학생이 '${assignedRole.title}' 역할을 맡은 누적 횟수`}
+                          >
+                            {heldCount}회째
+                          </span>
+                        )}
                       </span>
                     ) : (
                       <span className="text-xs font-bold px-2.5 py-1 rounded-xl bg-amber-500/20 text-amber-300">

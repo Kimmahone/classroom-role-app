@@ -112,6 +112,15 @@ export interface FirebaseConfig {
   appId: string;
   classroomId: string;
   enabled: boolean;
+  /**
+   * 저장된 설정의 스키마 버전. 이 값이 CURRENT_FIREBASE_CONFIG_VERSION 보다 낮으면
+   * 과거의 공용 문서(classrooms/{id})를 바라보던 설정이므로 동기화를 강제로 끄고
+   * 교사에게 다시 동의를 받는다.
+   */
+  configVersion?: number;
 }
+
+/** 클라우드 동기화의 현재 상태 (헤더/설정 화면 표시용) */
+export type SyncState = 'off' | 'needs-login' | 'idle' | 'saving' | 'error';
 
 export type ViewMode = 'dashboard' | 'tv' | 'assignment' | 'stats' | 'settings';

@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
-import { Student, Role, Assignment, DailyStatusHistory, ActivityCategory, ACTIVITY_CATEGORIES } from '../types';
+import React, { useState, useMemo } from 'react';
+import { Student, Role, Assignment, DailyStatusHistory, ACTIVITY_CATEGORIES, RoleHistoryRecord } from '../types';
 import { RoleIcon } from './RoleIcon';
-import { BarChart3, Award, Calendar, CheckCircle2, Filter } from 'lucide-react';
+import { BarChart3, Award, Calendar, CheckCircle2, Filter, History, Scale } from 'lucide-react';
 
 interface StatsViewProps {
   students: Student[];
   roles: Role[];
   assignments: Assignment[];
   dailyStatusHistory: DailyStatusHistory;
+  roleHistory: RoleHistoryRecord[];
 }
 
 export const StatsView: React.FC<StatsViewProps> = ({
@@ -15,6 +16,7 @@ export const StatsView: React.FC<StatsViewProps> = ({
   roles,
   assignments,
   dailyStatusHistory,
+  roleHistory,
 }) => {
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const dates = Object.keys(dailyStatusHistory).sort().reverse();
@@ -22,10 +24,21 @@ export const StatsView: React.FC<StatsViewProps> = ({
   const roleMap = new Map<string, Role>();
   roles.forEach((r) => roleMap.set(r.id, r));
 
+  // 선택한 활동 범주에 해당하는 역할 배정 이력
+  const relevantHistory = useMemo(
+    () => roleHistory.filter((r) => selectedCategoryFilter === 'all' || r.activityCategory === selectedCategoryFilter),
+    [roleHistory, selectedCategoryFilter]
+  );
+
+  const assignmentRounds = useMemo(
+    () => Array.from(new Set(relevantHistory.map((r) => r.date))).sort().reverse(),
+    [relevantHistory]
+  );
+
   // Calculate student participation stats
   const studentStats = students.map((student) => {
     let totalCategoryChecks = 0;
-    let categoryBreakdown: Record<string, number> = {};
+    const categoryBreakdown: Record<string, number> = {};
 
     ACTIVITY_CATEGORIES.forEach((cat) => {
       categoryBreakdown[cat.id] = 0;
@@ -43,6 +56,15 @@ export const StatsView: React.FC<StatsViewProps> = ({
       });
     });
 
+    // 이 학생이 맡았던 역할별 횟수 (배정 이력 기준)
+    const roleCounts = new Map<string, number>();
+    relevantHistory.forEach((r) => {
+      if (r.studentId !== student.id) return;
+      roleCounts.set(r.roleTitle, (roleCounts.get(r.roleTitle) || 0) + 1);
+    });
+    const experiencedRoles = Array.from(roleCounts.entries()).sort((a, b) => b[1] - a[1]);
+    const totalRoleRounds = experiencedRoles.reduce((sum, [, n]) => sum + n, 0);
+
     // Find current active assignments
     const currentAssignments = assignments.filter((a) => a.studentId === student.id);
 
@@ -51,8 +73,23 @@ export const StatsView: React.FC<StatsViewProps> = ({
       totalCategoryChecks,
       categoryBreakdown,
       currentAssignments,
+      experiencedRoles,
+      totalRoleRounds,
     };
   }).sort((a, b) => b.totalCategoryChecks - a.totalCategoryChecks);
+
+  // 역할별로 몇 명이 돌아가며 맡았는지 (배정 편중 확인용)
+  const roleRotationStats = useMemo(() => {
+    const map = new Map<string, { title: string; total: number; students: Map<string, number> }>();
+    relevantHistory.forEach((r) => {
+      const entry = map.get(r.roleId) || { title: r.roleTitle, total: 0, students: new Map<string, number>() };
+      entry.title = r.roleTitle;
+      entry.total += 1;
+      entry.students.set(r.studentName, (entry.students.get(r.studentName) || 0) + 1);
+      map.set(r.roleId, entry);
+    });
+    return Array.from(map.values()).sort((a, b) => b.total - a.total);
+  }, [relevantHistory]);
 
   return (
     <div className="space-y-8 animate-pop">
@@ -137,6 +174,7 @@ export const StatsView: React.FC<StatsViewProps> = ({
                   <th className="p-3">번호</th>
                   <th className="p-3">이름</th>
                   <th className="p-3">현재 부여된 역할 목록</th>
+                  <th className="p-3">맡았던 역할 이력</th>
                   <th className="p-3 text-right">누적 수행 횟수</th>
                 </tr>
               </thead>
@@ -163,6 +201,26 @@ export const StatsView: React.FC<StatsViewProps> = ({
                         )}
                       </div>
                     </td>
+                    <td className="p-3">
+                      {st.experiencedRoles.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {st.experiencedRoles.slice(0, 4).map(([title, count]) => (
+                            <span
+                              key={title}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 text-[11px]"
+                            >
+                              {title}
+                              <b className={count > 1 ? 'text-amber-300' : 'text-slate-500'}>×{count}</b>
+                            </span>
+                          ))}
+                          {st.experiencedRoles.length > 4 && (
+                            <span className="text-[11px] text-slate-500 px-1">+{st.experiencedRoles.length - 4}종</span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-slate-500 text-[11px]">이력 없음</span>
+                      )}
+                    </td>
                     <td className="p-3 text-right font-black text-emerald-400 text-sm">
                       {st.totalCategoryChecks}회
                     </td>
@@ -174,6 +232,80 @@ export const StatsView: React.FC<StatsViewProps> = ({
         </div>
 
       </div>
+
+      {/* 역할 순환 공정성 */}
+      <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+            <Scale className="w-5 h-5 text-emerald-400" />
+            역할별 순환 현황 (누적 {assignmentRounds.length}회차 배정)
+          </h3>
+          <span className="text-xs text-slate-400">
+            같은 학생이 특정 역할에 몰려 있지 않은지 확인하세요.
+          </span>
+        </div>
+
+        {roleRotationStats.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {roleRotationStats.map((entry) => {
+              const perStudent = Array.from(entry.students.entries()).sort((a, b) => b[1] - a[1]);
+              const maxCount = perStudent[0]?.[1] || 0;
+              // 한 학생이 전체의 절반 이상을 맡았다면 편중으로 본다.
+              const isSkewed = perStudent.length > 1 && maxCount / entry.total >= 0.5;
+
+              return (
+                <div key={entry.title} className="p-4 rounded-2xl bg-slate-800/50 border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="font-bold text-white text-sm truncate">{entry.title}</h4>
+                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-lg shrink-0 ${
+                      isSkewed
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                        : 'bg-slate-800 text-slate-400 border border-slate-700'
+                    }`}>
+                      {isSkewed ? '편중 주의' : `${perStudent.length}명 순환`}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {perStudent.slice(0, 8).map(([name, count]) => (
+                      <span
+                        key={name}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-900 text-slate-300 border border-slate-700 text-[11px]"
+                      >
+                        {name}
+                        <b className={count > 1 ? 'text-amber-300' : 'text-slate-500'}>×{count}</b>
+                      </span>
+                    ))}
+                    {perStudent.length > 8 && (
+                      <span className="text-[11px] text-slate-500 px-1">+{perStudent.length - 8}명</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-xs text-slate-500">
+            아직 저장된 역할 배정 이력이 없습니다. [역할 배정] 화면에서 배정을 실행하면 회차별로 자동 기록됩니다.
+          </p>
+        )}
+      </div>
+
+      {/* 배정 회차 기록 */}
+      {assignmentRounds.length > 0 && (
+        <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">
+          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+            <History className="w-5 h-5 text-amber-400" />
+            역할 배정 회차 기록 ({assignmentRounds.length}회)
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {assignmentRounds.slice(0, 40).map((d) => (
+              <span key={d} className="px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-slate-200">
+                {d}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* History Log Dates */}
       <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">

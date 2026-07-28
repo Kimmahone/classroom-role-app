@@ -1,0 +1,38 @@
+rules_version = '2';
+
+// 학급 역할 관리 앱 Firestore 보안 규칙
+//
+// 배포:
+//   firebase deploy --only firestore:rules
+// 또는 Firebase 콘솔 > Firestore Database > 규칙 탭에 붙여넣기.
+//
+// 핵심 원칙: 학생 실명이 포함된 학급 데이터는 로그인한 교사 본인만 읽고 쓸 수 있다.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 교사 본인 소유 학급 데이터
+    match /users/{userId}/classrooms/{classroomId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // 구버전(v1)에서 모든 사용자가 공유하던 공용 경로. 신규 접근을 전면 차단한다.
+    // 남아 있는 문서는 Firebase 콘솔에서 확인 후 삭제할 것.
+    match /classrooms/{classroomId} {
+      allow read, write: if false;
+    }
+
+    // 구버전 연결 테스트 경로도 차단
+    match /connectionTest/{docId} {
+      allow read, write: if false;
+    }
+
+    // 그 외 모든 경로 차단
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

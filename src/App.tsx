@@ -1,16 +1,18 @@
-import { useState, useEffect } from 'react';
-import { 
-  Student, Role, Assignment, DailyStatusHistory, ViewMode, ActivityCategory, RolePreset, FirebaseConfig, UserProfile 
+import { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  Student, Role, Assignment, DailyStatusHistory, ViewMode, ActivityCategory, RolePreset,
+  FirebaseConfig, UserProfile, RoleHistoryRecord, SyncState
 } from './types';
-import { 
-  loadStudents, saveStudents, 
-  loadRoles, saveRoles, 
-  loadAssignments, saveAssignments, 
-  loadDailyStatus, saveDailyStatus, 
-  loadCustomPresets, saveCustomPresets, 
-  loadFirebaseConfig, saveFirebaseConfig, 
-  loadActiveCategory, saveActiveCategory, 
-  getTodayKey 
+import {
+  loadStudents, saveStudents,
+  loadRoles, saveRoles,
+  loadAssignments, saveAssignments,
+  loadDailyStatus, saveDailyStatus,
+  loadCustomPresets, saveCustomPresets,
+  loadFirebaseConfig, saveFirebaseConfig,
+  loadActiveCategory, saveActiveCategory,
+  loadRoleHistory, saveRoleHistory, mergeRoleHistory,
+  getTodayKey
 } from './utils/storage';
 import { initFirebase, subscribeToClassroomData, saveClassroomDataToCloud, loginWithGoogle, logoutGoogle, subscribeToAuthChanges } from './services/firebase';
 import { soundFx } from './utils/sound';
@@ -24,6 +26,8 @@ import { SopModal } from './components/SopModal';
 import { FirebaseConfigModal } from './components/FirebaseConfigModal';
 import { PresetEditorModal } from './components/PresetEditorModal';
 
+const CLOUD_SYNC_DEBOUNCE_MS = 800;
+
 export function App() {
   // Global Application State
   const [students, setStudents] = useState<Student[]>([]);
@@ -31,10 +35,11 @@ export function App() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [dailyStatusHistory, setDailyStatusHistory] = useState<DailyStatusHistory>({});
   const [customPresets, setCustomPresets] = useState<RolePreset[]>([]);
+  const [roleHistory, setRoleHistory] = useState<RoleHistoryRecord[]>([]);
   const [firebaseConfig, setFirebaseConfigState] = useState<FirebaseConfig>(loadFirebaseConfig());
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [activeCategory, setActiveCategoryState] = useState<ActivityCategory>(loadActiveCategory());
-  
+
   // UI & Modal State
   const [currentMode, setCurrentMode] = useState<ViewMode>('dashboard');
   const [selectedDate, setSelectedDate] = useState<string>(getTodayKey());
@@ -43,96 +48,159 @@ export function App() {
   const [showFirebaseModal, setShowFirebaseModal] = useState<boolean>(false);
   const [presetModalData, setPresetModalData] = useState<{ open: boolean; preset: RolePreset | null }>({ open: false, preset: null });
 
+  // Cloud sync status
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [cloudError, setCloudError] = useState<string | null>(null);
+
+  // 클라우드 기록은 "동기화 켬 + Google 로그인" 두 조건이 모두 충족될 때만 이루어진다.
+  const cloudEnabled = Boolean(
+    firebaseConfig.enabled && firebaseConfig.apiKey && firebaseConfig.classroomId && userProfile?.uid
+  );
+
+  const syncState: SyncState = !firebaseConfig.enabled || !firebaseConfig.apiKey
+    ? 'off'
+    : !userProfile?.uid
+      ? 'needs-login'
+      : cloudError
+        ? 'error'
+        : cloudBusy
+          ? 'saving'
+          : 'idle';
+
   // Load Initial Local Storage Data
   useEffect(() => {
     refreshAllData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const refreshAllData = () => {
-    const loadedSt = loadStudents();
-    const loadedRo = loadRoles();
-    const loadedAs = loadAssignments();
-    const loadedDs = loadDailyStatus();
-    const loadedCp = loadCustomPresets();
     const loadedFc = loadFirebaseConfig();
-    const loadedCat = loadActiveCategory();
 
-    setStudents(loadedSt);
-    setRoles(loadedRo);
-    setAssignments(loadedAs);
-    setDailyStatusHistory(loadedDs);
-    setCustomPresets(loadedCp);
+    setStudents(loadStudents());
+    setRoles(loadRoles());
+    setAssignments(loadAssignments());
+    setDailyStatusHistory(loadDailyStatus());
+    setCustomPresets(loadCustomPresets());
+    setRoleHistory(loadRoleHistory());
     setFirebaseConfigState(loadedFc);
-    setActiveCategoryState(loadedCat);
+    setActiveCategoryState(loadActiveCategory());
 
     if (loadedFc.enabled && loadedFc.apiKey) {
       initFirebase(loadedFc);
     }
   };
 
+  // --- Cloud sync plumbing ---------------------------------------------------
+  // 최신 상태를 ref 에 보관해두고 디바운스된 타이머가 항상 최신 스냅샷을 쓰도록 한다.
+  // (이전 구현은 핸들러의 오래된 클로저 값을 그대로 전송했다.)
+  const cloudPayloadRef = useRef<Record<string, unknown>>({});
+  const syncTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    cloudPayloadRef.current = {
+      students,
+      roles,
+      assignments,
+      dailyStatus: dailyStatusHistory,
+      customPresets,
+      roleHistory,
+    };
+  }, [students, roles, assignments, dailyStatusHistory, customPresets, roleHistory]);
+
+  const scheduleCloudSync = useCallback(() => {
+    if (!cloudEnabled) return;
+
+    if (syncTimerRef.current !== null) window.clearTimeout(syncTimerRef.current);
+    setCloudBusy(true);
+    setCloudError(null);
+
+    syncTimerRef.current = window.setTimeout(async () => {
+      syncTimerRef.current = null;
+      const result = await saveClassroomDataToCloud(
+        firebaseConfig.classroomId,
+        cloudPayloadRef.current,
+        userProfile?.uid
+      );
+      setCloudBusy(false);
+      setCloudError(result.success ? null : result.message || '클라우드 저장에 실패했습니다.');
+    }, CLOUD_SYNC_DEBOUNCE_MS);
+  }, [cloudEnabled, firebaseConfig.classroomId, userProfile?.uid]);
+
+  // 언마운트 시 예약된 저장 정리
+  useEffect(() => () => {
+    if (syncTimerRef.current !== null) window.clearTimeout(syncTimerRef.current);
+  }, []);
+
   // Subscribe to Auth changes
   useEffect(() => {
-    if (firebaseConfig.enabled && firebaseConfig.apiKey) {
-      initFirebase(firebaseConfig);
-      const unsubAuth = subscribeToAuthChanges((user) => {
-        setUserProfile(user);
-      });
-      return () => {
-        if (unsubAuth) unsubAuth();
-      };
+    if (!firebaseConfig.enabled || !firebaseConfig.apiKey) {
+      setUserProfile(null);
+      return;
     }
-  }, [firebaseConfig.enabled, firebaseConfig.apiKey]);
+    initFirebase(firebaseConfig);
+    const unsubAuth = subscribeToAuthChanges(setUserProfile);
+    return () => {
+      if (unsubAuth) unsubAuth();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firebaseConfig.enabled, firebaseConfig.apiKey, firebaseConfig.projectId, firebaseConfig.appId]);
 
-  // Real-time Cloud Synchronization listener (Firebase)
+  // Real-time Cloud Synchronization listener — 로그인한 본인 문서만 구독한다.
+  const currentUid = userProfile?.uid ?? null;
   useEffect(() => {
-    if (firebaseConfig.enabled && firebaseConfig.apiKey && firebaseConfig.classroomId) {
-      initFirebase(firebaseConfig);
-      const unsub = subscribeToClassroomData(firebaseConfig.classroomId, (cloudData) => {
-        if (cloudData.students) {
+    if (!cloudEnabled || !currentUid) return;
+
+    initFirebase(firebaseConfig);
+    const unsub = subscribeToClassroomData(
+      firebaseConfig.classroomId,
+      (cloudData, fromLocalWrite) => {
+        // 내가 방금 보낸 쓰기가 되돌아온 것이면 편집 중인 로컬 상태를 덮지 않는다.
+        if (fromLocalWrite) return;
+
+        if (Array.isArray(cloudData.students)) {
           setStudents(cloudData.students as Student[]);
           saveStudents(cloudData.students as Student[]);
         }
-        if (cloudData.roles) {
+        if (Array.isArray(cloudData.roles)) {
           setRoles(cloudData.roles as Role[]);
           saveRoles(cloudData.roles as Role[]);
         }
-        if (cloudData.assignments) {
+        if (Array.isArray(cloudData.assignments)) {
           setAssignments(cloudData.assignments as Assignment[]);
           saveAssignments(cloudData.assignments as Assignment[]);
         }
-        if (cloudData.dailyStatus) {
+        if (cloudData.dailyStatus && typeof cloudData.dailyStatus === 'object') {
           setDailyStatusHistory(cloudData.dailyStatus as DailyStatusHistory);
           saveDailyStatus(cloudData.dailyStatus as DailyStatusHistory);
         }
-        if (cloudData.customPresets) {
+        if (Array.isArray(cloudData.customPresets)) {
           setCustomPresets(cloudData.customPresets as RolePreset[]);
           saveCustomPresets(cloudData.customPresets as RolePreset[]);
         }
-      }, userProfile?.uid);
+        if (Array.isArray(cloudData.roleHistory)) {
+          // 이력은 덮어쓰지 않고 합친다(다른 기기에서 기록된 과거 이력 보존).
+          setRoleHistory((prev) => {
+            const merged = mergeRoleHistory(prev, cloudData.roleHistory as RoleHistoryRecord[]);
+            saveRoleHistory(merged);
+            return merged;
+          });
+        }
+      },
+      currentUid,
+      (message) => setCloudError(message)
+    );
 
-      return () => {
-        if (unsub) unsub();
-      };
-    }
-  }, [firebaseConfig.enabled, firebaseConfig.classroomId, firebaseConfig.apiKey, userProfile]);
+    return () => {
+      if (unsub) unsub();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudEnabled, currentUid, firebaseConfig.classroomId, firebaseConfig.apiKey]);
 
-  const syncPayloadToCloud = (extraPayload: Record<string, unknown> = {}) => {
-    if (firebaseConfig.enabled && firebaseConfig.apiKey && firebaseConfig.classroomId) {
-      saveClassroomDataToCloud(firebaseConfig.classroomId, {
-        students,
-        roles,
-        assignments,
-        dailyStatus: dailyStatusHistory,
-        customPresets,
-        ...extraPayload,
-      }, userProfile?.uid);
-    }
-  };
-
+  // --- Auth handlers ---------------------------------------------------------
   const handleLoginGoogle = async () => {
     soundFx.playClick();
     if (!firebaseConfig.enabled || !firebaseConfig.apiKey) {
-      alert('먼저 Firebase 클라우드 설정을 활성화해 주세요!');
+      alert('먼저 [교사 설정 > 클라우드 Sync]에서 클라우드 동기화를 켜주세요.');
       setShowFirebaseModal(true);
       return;
     }
@@ -147,6 +215,7 @@ export function App() {
     soundFx.playClick();
     await logoutGoogle();
     setUserProfile(null);
+    setCloudError(null);
   };
 
   const handleCategoryChange = (cat: ActivityCategory) => {
@@ -154,33 +223,113 @@ export function App() {
     saveActiveCategory(cat);
   };
 
+  // --- Data handlers (참조 무결성 유지) ---------------------------------------
   const handleUpdateStudents = (newStudents: Student[]) => {
+    const nextIds = new Set(newStudents.map((s) => s.id));
+    const removedIds = students.filter((s) => !nextIds.has(s.id)).map((s) => s.id);
+
     setStudents(newStudents);
     saveStudents(newStudents);
-    syncPayloadToCloud({ students: newStudents });
+
+    if (removedIds.length > 0) {
+      const removed = new Set(removedIds);
+
+      const nextAssignments = assignments.filter((a) => !removed.has(a.studentId));
+      setAssignments(nextAssignments);
+      saveAssignments(nextAssignments);
+
+      const nextHistory = roleHistory.filter((r) => !removed.has(r.studentId));
+      setRoleHistory(nextHistory);
+      saveRoleHistory(nextHistory);
+
+      const nextDaily: DailyStatusHistory = {};
+      Object.entries(dailyStatusHistory).forEach(([date, dayRecord]) => {
+        const nextDay: Record<string, Record<string, boolean>> = {};
+        Object.entries(dayRecord).forEach(([category, checks]) => {
+          const nextChecks: Record<string, boolean> = {};
+          Object.entries(checks).forEach(([studentId, done]) => {
+            if (!removed.has(studentId)) nextChecks[studentId] = done;
+          });
+          if (Object.keys(nextChecks).length > 0) nextDay[category] = nextChecks;
+        });
+        if (Object.keys(nextDay).length > 0) nextDaily[date] = nextDay;
+      });
+      setDailyStatusHistory(nextDaily);
+      saveDailyStatus(nextDaily);
+    }
+
+    scheduleCloudSync();
   };
 
   const handleUpdateRoles = (newRoles: Role[]) => {
+    const nextIds = new Set(newRoles.map((r) => r.id));
+    const removedRoleIds = roles.filter((r) => !nextIds.has(r.id)).map((r) => r.id);
+
     setRoles(newRoles);
     saveRoles(newRoles);
-    syncPayloadToCloud({ roles: newRoles });
+
+    // 삭제된 역할을 가리키던 배정은 함께 제거한다(조용히 '미배정'으로 남는 문제 방지).
+    // 과거 이력(roleHistory)은 roleTitle 을 자체 보관하므로 그대로 유지한다.
+    if (removedRoleIds.length > 0) {
+      const removed = new Set(removedRoleIds);
+      const nextAssignments = assignments.filter((a) => !removed.has(a.roleId));
+      setAssignments(nextAssignments);
+      saveAssignments(nextAssignments);
+    }
+
+    scheduleCloudSync();
+  };
+
+  /** 배정이 바뀌면 오늘 날짜 기준으로 해당 범주의 역할 이력을 upsert 한다. */
+  const recordAssignmentHistory = (
+    nextAssignments: Assignment[],
+    category: ActivityCategory,
+    currentRoles: Role[]
+  ) => {
+    const date = getTodayKey();
+    const studentMap = new Map(students.map((s) => [s.id, s]));
+    const roleMap = new Map(currentRoles.map((r) => [r.id, r]));
+
+    const records: RoleHistoryRecord[] = [];
+    nextAssignments.forEach((a) => {
+      if ((a.activityCategory || 'daily') !== category) return;
+      const student = studentMap.get(a.studentId);
+      const role = roleMap.get(a.roleId);
+      if (!student || !role) return;
+      records.push({
+        date,
+        activityCategory: category,
+        studentId: student.id,
+        studentName: student.name,
+        roleId: role.id,
+        roleTitle: role.title,
+      });
+    });
+
+    if (records.length === 0) return;
+
+    const merged = mergeRoleHistory(roleHistory, records);
+    setRoleHistory(merged);
+    saveRoleHistory(merged);
   };
 
   const handleUpdateAssignments = (newAssignments: Assignment[]) => {
     setAssignments(newAssignments);
     saveAssignments(newAssignments);
-    syncPayloadToCloud({ assignments: newAssignments });
+    recordAssignmentHistory(newAssignments, activeCategory, roles);
+    scheduleCloudSync();
   };
 
   const handleUpdateCustomPresets = (newPresets: RolePreset[]) => {
     setCustomPresets(newPresets);
     saveCustomPresets(newPresets);
-    syncPayloadToCloud({ customPresets: newPresets });
+    scheduleCloudSync();
   };
 
   const handleUpdateFirebaseConfig = (newConfig: FirebaseConfig) => {
     setFirebaseConfigState(newConfig);
     saveFirebaseConfig(newConfig);
+    setCloudError(null);
     if (newConfig.enabled && newConfig.apiKey) {
       initFirebase(newConfig);
     }
@@ -204,7 +353,7 @@ export function App() {
 
     setDailyStatusHistory(updatedHistory);
     saveDailyStatus(updatedHistory);
-    syncPayloadToCloud({ dailyStatus: updatedHistory });
+    scheduleCloudSync();
   };
 
   const handleResetToday = () => {
@@ -219,7 +368,7 @@ export function App() {
 
     setDailyStatusHistory(updatedHistory);
     saveDailyStatus(updatedHistory);
-    syncPayloadToCloud({ dailyStatus: updatedHistory });
+    scheduleCloudSync();
   };
 
   const handleToggleSound = () => {
@@ -240,7 +389,7 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      
+
       {/* Header */}
       {currentMode !== 'tv' && (
         <Header
@@ -251,7 +400,8 @@ export function App() {
           activeCategory={activeCategory}
           onCategoryChange={handleCategoryChange}
           completedRatio={completedRatio}
-          firebaseConfig={firebaseConfig}
+          syncState={syncState}
+          syncError={cloudError}
           userProfile={userProfile}
           onLoginGoogle={handleLoginGoogle}
           onLogoutGoogle={handleLogoutGoogle}
@@ -292,6 +442,7 @@ export function App() {
             students={students}
             roles={roles}
             assignments={assignments}
+            roleHistory={roleHistory}
             activeCategory={activeCategory}
             onUpdateAssignments={handleUpdateAssignments}
           />
@@ -303,6 +454,7 @@ export function App() {
             roles={roles}
             assignments={assignments}
             dailyStatusHistory={dailyStatusHistory}
+            roleHistory={roleHistory}
           />
         )}
 
@@ -313,6 +465,10 @@ export function App() {
             customPresets={customPresets}
             firebaseConfig={firebaseConfig}
             activeCategory={activeCategory}
+            syncState={syncState}
+            syncError={cloudError}
+            userProfile={userProfile}
+            onLoginGoogle={handleLoginGoogle}
             onUpdateStudents={handleUpdateStudents}
             onUpdateRoles={handleUpdateRoles}
             onUpdateCustomPresets={handleUpdateCustomPresets}
@@ -333,6 +489,7 @@ export function App() {
       {showFirebaseModal && (
         <FirebaseConfigModal
           config={firebaseConfig}
+          userProfile={userProfile}
           onSave={handleUpdateFirebaseConfig}
           onClose={() => setShowFirebaseModal(false)}
         />
@@ -361,8 +518,8 @@ export function App() {
       {currentMode !== 'tv' && (
         <footer className="py-6 border-t border-slate-900 text-center text-xs text-slate-500">
           <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-2">
-            <span>🏫 올인원 학급 역할 & 활동 데이터 기록 플랫폼</span>
-            <span>Firebase Cloud Sync & Google Auth Enabled</span>
+            <span>🏫 올인원 학급 역할 &amp; 활동 데이터 기록 플랫폼</span>
+            <span>학급 데이터는 로그인한 교사 본인 계정에만 저장됩니다</span>
           </div>
         </footer>
       )}

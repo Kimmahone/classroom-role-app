@@ -1,16 +1,17 @@
 import React, { useState } from 'react';
-import { FirebaseConfig } from '../types';
+import { FirebaseConfig, UserProfile } from '../types';
 import { testFirebaseConnection } from '../services/firebase';
 import { soundFx } from '../utils/sound';
-import { Cloud, X, CheckCircle2, AlertCircle, ExternalLink } from 'lucide-react';
+import { Cloud, X, CheckCircle2, AlertCircle, ExternalLink, ShieldCheck, ShieldAlert } from 'lucide-react';
 
 interface FirebaseConfigModalProps {
   config: FirebaseConfig;
+  userProfile: UserProfile | null;
   onSave: (config: FirebaseConfig) => void;
   onClose: () => void;
 }
 
-export const FirebaseConfigModal: React.FC<FirebaseConfigModalProps> = ({ config, onSave, onClose }) => {
+export const FirebaseConfigModal: React.FC<FirebaseConfigModalProps> = ({ config, userProfile, onSave, onClose }) => {
   const [formData, setFormData] = useState<FirebaseConfig>({ ...config });
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success?: boolean; message?: string } | null>(null);
@@ -74,11 +75,21 @@ export const FirebaseConfigModal: React.FC<FirebaseConfigModalProps> = ({ config
 
         <form onSubmit={handleSubmit} className="space-y-4">
           
+          {/* 저장 위치 안내 */}
+          <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex gap-3">
+            <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+            <p className="text-xs text-emerald-100/80 leading-relaxed">
+              학생 이름이 담긴 데이터는 <b className="text-emerald-300">Google 로그인한 선생님 본인 계정</b>
+              (<span className="font-mono">users/{'{uid}'}/classrooms/</span>) 아래에만 저장되며 다른 사용자는 열람할 수 없습니다.
+              로그인하지 않으면 클라우드에 아무것도 전송되지 않고 이 기기에만 저장됩니다.
+            </p>
+          </div>
+
           {/* Cloud Enable Toggle */}
           <div className="flex items-center justify-between p-4 rounded-2xl bg-slate-800/80 border border-slate-700">
             <div>
               <span className="text-sm font-bold text-white block">클라우드 자동 동기화 사용</span>
-              <span className="text-xs text-slate-400">다른 디바이스와 실시간 데이터 연동</span>
+              <span className="text-xs text-slate-400">다른 디바이스와 실시간 데이터 연동 (Google 로그인 필요)</span>
             </div>
             <input
               type="checkbox"
@@ -87,6 +98,13 @@ export const FirebaseConfigModal: React.FC<FirebaseConfigModalProps> = ({ config
               className="w-5 h-5 accent-indigo-600 rounded cursor-pointer"
             />
           </div>
+
+          {formData.enabled && !userProfile && (
+            <div className="p-3.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-xs text-amber-100 flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4 shrink-0 text-amber-400" />
+              <span>저장 후 헤더의 <b>[구글 로그인]</b>을 눌러야 실제 동기화가 시작됩니다.</span>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>

@@ -13,6 +13,13 @@ export const STORAGE_KEYS = {
   ACTIVE_CATEGORY: 'classroom_role_active_category',
 };
 
+/**
+ * v1 -> v2: 비로그인 상태에서 모든 사용자가 공용 문서(classrooms/my_classroom_1)를
+ * 공유하던 구조를 폐기하고, 반드시 Google 로그인 후 users/{uid}/classrooms/{id} 에만
+ * 기록하도록 변경. v1 설정이 저장된 브라우저는 동기화가 자동으로 꺼진다.
+ */
+export const CURRENT_FIREBASE_CONFIG_VERSION = 2;
+
 export const DEFAULT_FIREBASE_CONFIG: FirebaseConfig = {
   apiKey: "AIzaSyAoNz7NrsNoeBCW1iB3ARUnNcpJFMxt5Vo",
   authDomain: "role-project-7de1a.firebaseapp.com",
@@ -21,7 +28,9 @@ export const DEFAULT_FIREBASE_CONFIG: FirebaseConfig = {
   messagingSenderId: "260637706782",
   appId: "1:260637706782:web:4554c036aa8fed80273c0f",
   classroomId: "my_classroom_1",
-  enabled: true,
+  // 기본값은 로컬 전용. 교사가 직접 켜고 Google 로그인을 해야만 클라우드에 기록된다.
+  enabled: false,
+  configVersion: CURRENT_FIREBASE_CONFIG_VERSION,
 };
 
 // Built-in Primary School Presets
@@ -324,18 +333,61 @@ export const saveCustomPresets = (presets: RolePreset[]): void => {
 export const loadFirebaseConfig = (): FirebaseConfig => {
   try {
     const data = localStorage.getItem(STORAGE_KEYS.FIREBASE_CONFIG);
-    if (data) {
-      const parsed = JSON.parse(data);
-      if (parsed.apiKey) return parsed;
+    if (!data) return DEFAULT_FIREBASE_CONFIG;
+
+    const parsed = JSON.parse(data) as Partial<FirebaseConfig>;
+    if (!parsed.apiKey) return DEFAULT_FIREBASE_CONFIG;
+
+    const merged: FirebaseConfig = { ...DEFAULT_FIREBASE_CONFIG, ...parsed };
+
+    // 구버전 설정은 공용 문서를 바라보고 있었으므로 동기화를 끄고 재동의를 받는다.
+    if ((parsed.configVersion || 1) < CURRENT_FIREBASE_CONFIG_VERSION) {
+      merged.enabled = false;
+      merged.configVersion = CURRENT_FIREBASE_CONFIG_VERSION;
+      localStorage.setItem(STORAGE_KEYS.FIREBASE_CONFIG, JSON.stringify(merged));
     }
-    return DEFAULT_FIREBASE_CONFIG;
+    return merged;
   } catch {
     return DEFAULT_FIREBASE_CONFIG;
   }
 };
 
 export const saveFirebaseConfig = (config: FirebaseConfig): void => {
-  localStorage.setItem(STORAGE_KEYS.FIREBASE_CONFIG, JSON.stringify(config));
+  const stamped: FirebaseConfig = { ...config, configVersion: CURRENT_FIREBASE_CONFIG_VERSION };
+  localStorage.setItem(STORAGE_KEYS.FIREBASE_CONFIG, JSON.stringify(stamped));
+};
+
+// --- 역할 배정 이력 (RoleHistoryRecord) ---
+// 같은 날짜 + 같은 활동 범주 + 같은 학생에 대해서는 한 건만 유지한다(재배정 시 덮어씀).
+export const historyRecordKey = (r: Pick<RoleHistoryRecord, 'date' | 'activityCategory' | 'studentId'>): string =>
+  `${r.date}|${r.activityCategory}|${r.studentId}`;
+
+export const loadRoleHistory = (): RoleHistoryRecord[] => {
+  try {
+    const data = localStorage.getItem(STORAGE_KEYS.HISTORY);
+    const parsed = data ? JSON.parse(data) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+export const saveRoleHistory = (history: RoleHistoryRecord[]): void => {
+  localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(history));
+};
+
+/** 기존 이력에 새 기록을 upsert 한 배열을 반환한다. */
+export const mergeRoleHistory = (
+  existing: RoleHistoryRecord[],
+  incoming: RoleHistoryRecord[]
+): RoleHistoryRecord[] => {
+  if (incoming.length === 0) return existing;
+
+  const byKey = new Map<string, RoleHistoryRecord>();
+  existing.forEach((r) => byKey.set(historyRecordKey(r), r));
+  incoming.forEach((r) => byKey.set(historyRecordKey(r), r));
+
+  return Array.from(byKey.values()).sort((a, b) => a.date.localeCompare(b.date));
 };
 
 export const loadActiveCategory = (): ActivityCategory => {
@@ -367,33 +419,95 @@ export const formatKoreanDate = (dateStr: string): string => {
 };
 
 // Export entire database payload to JSON
+// firebaseConfig 는 접속 키를 포함하고, 복원 시 앱이 제3자 프로젝트를 바라보게 만들 수 있어
+// 백업 대상에서 제외한다. (클라우드 설정은 설정 화면에서 직접 입력)
 export const exportDataToJson = (): string => {
   const exportPayload = {
-    version: '2.0',
+    version: '3.0',
     exportDate: new Date().toISOString(),
     students: loadStudents(),
     roles: loadRoles(),
     assignments: loadAssignments(),
     dailyStatus: loadDailyStatus(),
     customPresets: loadCustomPresets(),
-    firebaseConfig: loadFirebaseConfig(),
+    roleHistory: loadRoleHistory(),
   };
   return JSON.stringify(exportPayload, null, 2);
 };
 
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+const validStudents = (v: unknown): v is Student[] =>
+  Array.isArray(v) && v.every((s) => isObject(s) && typeof s.id === 'string' && typeof s.name === 'string');
+
+const validRoles = (v: unknown): v is Role[] =>
+  Array.isArray(v) && v.every((r) => isObject(r) && typeof r.id === 'string' && typeof r.title === 'string');
+
+const validAssignments = (v: unknown): v is Assignment[] =>
+  Array.isArray(v) && v.every((a) => isObject(a) && typeof a.studentId === 'string' && typeof a.roleId === 'string');
+
+const validDailyStatus = (v: unknown): v is DailyStatusHistory =>
+  isObject(v) && Object.values(v).every((day) => isObject(day));
+
+const validPresets = (v: unknown): v is RolePreset[] =>
+  Array.isArray(v) && v.every((p) => isObject(p) && typeof p.id === 'string' && Array.isArray(p.roles));
+
+const validHistory = (v: unknown): v is RoleHistoryRecord[] =>
+  Array.isArray(v) && v.every((r) => isObject(r) && typeof r.date === 'string' && typeof r.studentId === 'string');
+
+export interface ImportResult {
+  success: boolean;
+  message: string;
+  imported: string[];
+}
+
 // Import database payload from JSON
-export const importDataFromJson = (jsonStr: string): boolean => {
+export const importDataFromJson = (jsonStr: string): ImportResult => {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(jsonStr);
-    if (parsed.students) saveStudents(parsed.students);
-    if (parsed.roles) saveRoles(parsed.roles);
-    if (parsed.assignments) saveAssignments(parsed.assignments);
-    if (parsed.dailyStatus) saveDailyStatus(parsed.dailyStatus);
-    if (parsed.customPresets) saveCustomPresets(parsed.customPresets);
-    if (parsed.firebaseConfig) saveFirebaseConfig(parsed.firebaseConfig);
-    return true;
-  } catch (e) {
-    console.error('Import JSON error:', e);
-    return false;
+    parsed = JSON.parse(jsonStr);
+  } catch {
+    return { success: false, message: 'JSON 형식이 올바르지 않습니다.', imported: [] };
   }
+
+  if (!isObject(parsed)) {
+    return { success: false, message: '백업 파일의 최상위 구조가 올바르지 않습니다.', imported: [] };
+  }
+
+  const imported: string[] = [];
+  const rejected: string[] = [];
+
+  const apply = <T,>(key: string, label: string, guard: (v: unknown) => v is T, save: (v: T) => void) => {
+    const value = parsed[key];
+    if (value === undefined) return;
+    if (guard(value)) {
+      save(value);
+      imported.push(label);
+    } else {
+      rejected.push(label);
+    }
+  };
+
+  apply('students', '학생 명단', validStudents, saveStudents);
+  apply('roles', '역할 목록', validRoles, saveRoles);
+  apply('assignments', '역할 배정', validAssignments, saveAssignments);
+  apply('dailyStatus', '일일 체크 기록', validDailyStatus, saveDailyStatus);
+  apply('customPresets', '커스텀 템플릿', validPresets, saveCustomPresets);
+  apply('roleHistory', '역할 배정 이력', validHistory, saveRoleHistory);
+
+  if (imported.length === 0) {
+    return {
+      success: false,
+      message: '복원할 수 있는 데이터를 찾지 못했습니다. 이 앱에서 내보낸 백업 파일인지 확인해 주세요.',
+      imported: [],
+    };
+  }
+
+  const warn = rejected.length > 0 ? ` (형식 오류로 건너뜀: ${rejected.join(', ')})` : '';
+  return {
+    success: true,
+    message: `복원 완료: ${imported.join(', ')}${warn}`,
+    imported,
+  };
 };
