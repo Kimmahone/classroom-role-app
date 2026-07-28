@@ -1,18 +1,22 @@
 import React, { useState } from 'react';
-import { ViewMode, ActivityCategory, ACTIVITY_CATEGORIES, UserProfile, SyncState } from '../types';
+import { ViewMode, ActivityCategory, ActivityCategoryConfig, UserProfile, SyncState, paletteOf } from '../types';
 import {
   LayoutDashboard, Shuffle, BarChart3, Settings, Monitor, Volume2, VolumeX,
   Cloud, CloudOff, CloudUpload, ShieldAlert, LogIn, LogOut, Menu, X
 } from 'lucide-react';
 import { soundFx } from '../utils/sound';
+import { RoleIcon } from './RoleIcon';
+import { getPeriodInfo } from '../utils/category';
 
 interface HeaderProps {
   currentMode: ViewMode;
   onModeChange: (mode: ViewMode) => void;
   soundEnabled: boolean;
   onToggleSound: () => void;
+  categories: ActivityCategoryConfig[];
   activeCategory: ActivityCategory;
   onCategoryChange: (category: ActivityCategory) => void;
+  selectedDate: string;
   completedRatio: number;
   syncState: SyncState;
   syncError: string | null;
@@ -62,8 +66,10 @@ export const Header: React.FC<HeaderProps> = ({
   onModeChange,
   soundEnabled,
   onToggleSound,
+  categories,
   activeCategory,
   onCategoryChange,
+  selectedDate,
   completedRatio,
   syncState,
   syncError,
@@ -257,25 +263,44 @@ export const Header: React.FC<HeaderProps> = ({
         )}
 
         {/* Activity Category Quick Bar */}
-        <div className="flex items-center gap-2 py-3 border-t border-slate-800/80 overflow-x-auto">
+        <div className="flex items-center gap-2 py-2.5 border-t border-slate-800/80 overflow-x-auto">
           <span className="text-xs font-bold text-slate-400 shrink-0 mr-1">🎯 활동 범주:</span>
-          {ACTIVITY_CATEGORIES.map((cat) => (
-            <button
-              key={cat.id}
-              onClick={() => {
-                soundFx.playClick();
-                onCategoryChange(cat.id);
-              }}
-              aria-pressed={activeCategory === cat.id}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-xl whitespace-nowrap transition ${
-                activeCategory === cat.id
-                  ? 'bg-indigo-600 text-white shadow-md ring-1 ring-indigo-400'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700/60'
-              }`}
-            >
-              <span>{cat.name}</span>
-            </button>
-          ))}
+          {categories.map((cat) => {
+            const palette = paletteOf(cat.color);
+            const period = getPeriodInfo(cat, selectedDate);
+            const isActive = activeCategory === cat.id;
+            return (
+              <button
+                key={cat.id}
+                onClick={() => {
+                  soundFx.playClick();
+                  onCategoryChange(cat.id);
+                }}
+                aria-pressed={isActive}
+                title={period.rangeLabel ? `운영 기간 ${period.rangeLabel} · ${period.label}` : '상시 운영'}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl whitespace-nowrap border transition ${
+                  isActive ? palette.activeChip : palette.chip
+                } ${!period.inPeriod && !isActive ? 'opacity-50' : ''}`}
+              >
+                <RoleIcon name={cat.icon} className="w-3.5 h-3.5" />
+                <span>{cat.name}</span>
+                {period.status !== 'always' && (
+                  <span
+                    className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold ${
+                      isActive ? 'bg-black/25 text-white' : 'bg-slate-900/70 text-slate-300'
+                    }`}
+                  >
+                    {period.status === 'ended' ? '종료' : period.status === 'upcoming' ? '예정' : period.label}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+          {categories.length === 0 && (
+            <span className="text-xs text-slate-500">
+              활동 범주가 없습니다. [교사 설정 → 활동 범주]에서 추가해 주세요.
+            </span>
+          )}
         </div>
       </div>
     </header>

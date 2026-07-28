@@ -1,6 +1,10 @@
 import React, { useState, useMemo } from 'react';
-import { Student, Role, Assignment, DailyStatusHistory, ACTIVITY_CATEGORIES, RoleHistoryRecord } from '../types';
+import {
+  Student, Role, Assignment, DailyStatusHistory, ActivityCategoryConfig, RoleHistoryRecord
+} from '../types';
 import { RoleIcon } from './RoleIcon';
+import { getPeriodInfo, PERIOD_BADGE_CLASS } from '../utils/category';
+import { getTodayKey } from '../utils/storage';
 import { BarChart3, Award, Calendar, CheckCircle2, Filter, History, Scale } from 'lucide-react';
 
 interface StatsViewProps {
@@ -9,6 +13,7 @@ interface StatsViewProps {
   assignments: Assignment[];
   dailyStatusHistory: DailyStatusHistory;
   roleHistory: RoleHistoryRecord[];
+  categories: ActivityCategoryConfig[];
 }
 
 export const StatsView: React.FC<StatsViewProps> = ({
@@ -17,9 +22,11 @@ export const StatsView: React.FC<StatsViewProps> = ({
   assignments,
   dailyStatusHistory,
   roleHistory,
+  categories,
 }) => {
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const dates = Object.keys(dailyStatusHistory).sort().reverse();
+  const todayKey = getTodayKey();
 
   const roleMap = new Map<string, Role>();
   roles.forEach((r) => roleMap.set(r.id, r));
@@ -40,7 +47,7 @@ export const StatsView: React.FC<StatsViewProps> = ({
     let totalCategoryChecks = 0;
     const categoryBreakdown: Record<string, number> = {};
 
-    ACTIVITY_CATEGORIES.forEach((cat) => {
+    categories.forEach((cat) => {
       categoryBreakdown[cat.id] = 0;
     });
 
@@ -116,11 +123,34 @@ export const StatsView: React.FC<StatsViewProps> = ({
               className="bg-slate-800 text-white font-bold text-xs px-3.5 py-2 rounded-xl border border-slate-700 focus:ring-2 focus:ring-indigo-500"
             >
               <option value="all">전체 활동 범주 통합</option>
-              {ACTIVITY_CATEGORIES.map((cat) => (
+              {categories.map((cat) => (
                 <option key={cat.id} value={cat.id}>{cat.name}</option>
               ))}
             </select>
           </div>
+        </div>
+      </div>
+
+      {/* 활동 범주별 운영 기간 요약 */}
+      <div className="p-5 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-3">
+        <h3 className="text-sm font-bold text-white flex items-center gap-2">
+          <Calendar className="w-4 h-4 text-emerald-400" />
+          활동 범주별 운영 기간
+        </h3>
+        <div className="flex flex-wrap gap-2">
+          {categories.map((cat) => {
+            const period = getPeriodInfo(cat, todayKey);
+            return (
+              <span
+                key={cat.id}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold border ${PERIOD_BADGE_CLASS[period.status]}`}
+              >
+                <RoleIcon name={cat.icon} className="w-3.5 h-3.5" />
+                {cat.name}
+                <span className="opacity-70">· {period.rangeLabel ? `${period.rangeLabel} (${period.label})` : '상시 운영'}</span>
+              </span>
+            );
+          })}
         </div>
       </div>
 

@@ -1,11 +1,16 @@
-import React, { useState } from 'react';
-import { Student, Role, RolePreset, FirebaseConfig, ActivityCategory, ACTIVITY_CATEGORIES, SyncState, UserProfile } from '../types';
-import { BUILTIN_ROLE_PRESETS, exportDataToJson, importDataFromJson } from '../utils/storage';
+import React, { useMemo, useState } from 'react';
+import {
+  Student, Role, RolePreset, FirebaseConfig, ActivityCategory, ActivityCategoryConfig,
+  SyncState, UserProfile, CATEGORY_PALETTES, paletteOf
+} from '../types';
+import { BUILTIN_ROLE_PRESETS, exportDataToJson, importDataFromJson, getTodayKey } from '../utils/storage';
+import { getPeriodInfo, PERIOD_BADGE_CLASS, makeCategoryId } from '../utils/category';
 import { RoleIcon, AVAILABLE_ICONS } from './RoleIcon';
 import { soundFx } from '../utils/sound';
 import {
   Users, Briefcase, Download, Upload, Plus, Trash2, Edit, Sparkles, BookOpen, Layers, Cloud, X,
-  ShieldAlert, LogIn, ShieldCheck
+  ShieldAlert, LogIn, ShieldCheck, Search, CalendarClock, ArrowUp, ArrowDown, Copy, CheckSquare, Square,
+  Tag, Wand2
 } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -13,6 +18,7 @@ interface SettingsViewProps {
   roles: Role[];
   customPresets: RolePreset[];
   firebaseConfig: FirebaseConfig;
+  categories: ActivityCategoryConfig[];
   activeCategory: ActivityCategory;
   syncState: SyncState;
   syncError: string | null;
@@ -20,17 +26,21 @@ interface SettingsViewProps {
   onLoginGoogle: () => void;
   onUpdateStudents: (students: Student[]) => void;
   onUpdateRoles: (roles: Role[]) => void;
+  onUpdateCategories: (categories: ActivityCategoryConfig[]) => void;
   onUpdateCustomPresets: (presets: RolePreset[]) => void;
   onOpenFirebaseModal: () => void;
   onOpenPresetModal: (preset: RolePreset | null) => void;
   onRefreshData: () => void;
 }
 
+type SettingsTab = 'students' | 'categories' | 'roles' | 'presets' | 'cloud' | 'backup';
+
 export const SettingsView: React.FC<SettingsViewProps> = ({
   students,
   roles,
   customPresets,
   firebaseConfig,
+  categories,
   activeCategory,
   syncState,
   syncError,
@@ -38,12 +48,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onLoginGoogle,
   onUpdateStudents,
   onUpdateRoles,
+  onUpdateCategories,
   onUpdateCustomPresets,
   onOpenFirebaseModal,
   onOpenPresetModal,
   onRefreshData,
 }) => {
-  const [activeTab, setActiveTab] = useState<'students' | 'roles' | 'presets' | 'cloud' | 'backup'>('students');
+  const [activeTab, setActiveTab] = useState<SettingsTab>('students');
 
   // Student Bulk Add
   const [bulkText, setBulkText] = useState('');
@@ -52,6 +63,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // Role Editing State
   const [editingRole, setEditingRole] = useState<Partial<Role> | null>(null);
+
+  // Role list filters & multi-select
+  const [roleCategoryFilter, setRoleCategoryFilter] = useState<string>('all');
+  const [roleSearch, setRoleSearch] = useState('');
+  const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
+  const [bulkCategory, setBulkCategory] = useState<string>('');
+  const [bulkCount, setBulkCount] = useState<string>('');
+  const [bulkIcon, setBulkIcon] = useState<string>('');
+
+  // Category editing
+  const [editingCategory, setEditingCategory] = useState<ActivityCategoryConfig | null>(null);
+  const [isNewCategory, setIsNewCategory] = useState(false);
+
+  const fallbackCategoryId = categories[0]?.id ?? 'daily';
+  const categoryName = (id: string) => categories.find((c) => c.id === id)?.name || '미분류';
 
   // Combine built-in & custom presets
   const allPresets = [...customPresets, ...BUILTIN_ROLE_PRESETS];
@@ -99,13 +125,78 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
-  // Role CRUD
+  // --- 활동 범주 CRUD -------------------------------------------------------
+  const rolesInCategory = (catId: string) =>
+    roles.filter((r) => (r.activityCategory || fallbackCategoryId) === catId).length;
+
+  const handleOpenNewCategory = () => {
+    soundFx.playClick();
+    setIsNewCategory(true);
+    setEditingCategory({
+      id: makeCategoryId(),
+      name: '',
+      icon: 'Sparkles',
+      color: 'indigo',
+      description: '',
+      startDate: '',
+      endDate: '',
+    });
+  };
+
+  const handleSaveCategory = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCategory || !editingCategory.name.trim()) return;
+
+    if (editingCategory.startDate && editingCategory.endDate && editingCategory.startDate > editingCategory.endDate) {
+      alert('종료일이 시작일보다 빠릅니다. 기간을 다시 확인해 주세요.');
+      return;
+    }
+
+    soundFx.playSuccess();
+    const cleaned: ActivityCategoryConfig = { ...editingCategory, name: editingCategory.name.trim() };
+    const exists = categories.some((c) => c.id === cleaned.id);
+    onUpdateCategories(exists ? categories.map((c) => (c.id === cleaned.id ? cleaned : c)) : [...categories, cleaned]);
+    setEditingCategory(null);
+    setIsNewCategory(false);
+  };
+
+  const handleDeleteCategory = (cat: ActivityCategoryConfig) => {
+    if (categories.length <= 1) {
+      alert('활동 범주는 최소 1개가 필요합니다. 새 범주를 먼저 추가한 뒤 삭제해 주세요.');
+      return;
+    }
+    const roleCount = rolesInCategory(cat.id);
+    const lines = [
+      `'${cat.name}' 활동 범주를 삭제합니다.`,
+      '',
+      roleCount > 0
+        ? `· 이 범주에 속한 역할 ${roleCount}종과 해당 배정이 함께 삭제됩니다.`
+        : '· 이 범주에 속한 역할은 없습니다.',
+      '· 통계에 쌓인 과거 이력은 그대로 보존됩니다.',
+      '',
+      '계속하시겠습니까?',
+    ];
+    if (!confirm(lines.join('\n'))) return;
+    soundFx.playClick();
+    onUpdateCategories(categories.filter((c) => c.id !== cat.id));
+  };
+
+  const handleMoveCategory = (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= categories.length) return;
+    soundFx.playClick();
+    const next = [...categories];
+    [next[index], next[target]] = [next[target], next[index]];
+    onUpdateCategories(next);
+  };
+
+  // --- 역할 CRUD ------------------------------------------------------------
   const handleSaveRole = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingRole || !editingRole.title) return;
     soundFx.playClick();
 
-    const categoryForRole = editingRole.activityCategory || activeCategory || 'daily';
+    const categoryForRole = editingRole.activityCategory || activeCategory || fallbackCategoryId;
 
     if (editingRole.id) {
       onUpdateRoles(roles.map((r) => (r.id === editingRole.id ? ({ ...editingRole, activityCategory: categoryForRole } as Role) : r)));
@@ -128,23 +219,101 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   const handleDeleteRole = (id: string) => {
-    if (confirm('이 역할을 삭제하시겠습니까?')) {
+    const target = roles.find((r) => r.id === id);
+    if (confirm(`'${target?.title || '이 역할'}'을 삭제하시겠습니까?\n이 역할에 대한 현재 배정도 함께 해제됩니다.`)) {
       soundFx.playClick();
       onUpdateRoles(roles.filter((r) => r.id !== id));
+      setSelectedRoleIds((prev) => prev.filter((rid) => rid !== id));
     }
   };
 
-  const handleLoadPreset = (preset: RolePreset) => {
-    const targetCategory: ActivityCategory = preset.activityCategory || 'daily';
-    const categoryName = ACTIVITY_CATEGORIES.find((c) => c.id === targetCategory)?.name || '1인 1역';
+  // 필터 + 검색이 적용된 역할 목록
+  const visibleRoles = useMemo(() => {
+    const q = roleSearch.trim().toLowerCase();
+    return roles.filter((r) => {
+      const catId = r.activityCategory || fallbackCategoryId;
+      if (roleCategoryFilter !== 'all' && catId !== roleCategoryFilter) return false;
+      if (!q) return true;
+      return (
+        r.title.toLowerCase().includes(q) ||
+        (r.description || '').toLowerCase().includes(q) ||
+        (r.subjectName || '').toLowerCase().includes(q)
+      );
+    });
+  }, [roles, roleCategoryFilter, roleSearch, fallbackCategoryId]);
 
-    const existingInCategory = roles.filter((r) => (r.activityCategory || 'daily') === targetCategory);
+  const visibleIds = visibleRoles.map((r) => r.id);
+  const selectedVisible = selectedRoleIds.filter((id) => visibleIds.includes(id));
+  const allVisibleSelected = visibleRoles.length > 0 && selectedVisible.length === visibleRoles.length;
+
+  const toggleSelectRole = (id: string) => {
+    setSelectedRoleIds((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]));
+  };
+
+  const toggleSelectAllVisible = () => {
+    soundFx.playClick();
+    setSelectedRoleIds(allVisibleSelected ? selectedRoleIds.filter((id) => !visibleIds.includes(id)) : Array.from(new Set([...selectedRoleIds, ...visibleIds])));
+  };
+
+  /** 선택한 역할들에 지정한 항목만 일괄 적용한다. */
+  const handleBulkApply = () => {
+    if (selectedVisible.length === 0) return;
+
+    const patch: Partial<Role> = {};
+    if (bulkCategory) patch.activityCategory = bulkCategory;
+    if (bulkCount) {
+      const n = parseInt(bulkCount, 10);
+      if (!Number.isNaN(n) && n >= 1) patch.count = n;
+    }
+    if (bulkIcon) patch.icon = bulkIcon;
+
+    if (Object.keys(patch).length === 0) {
+      alert('일괄 적용할 항목(활동 범주 · 필요 인원 · 아이콘)을 하나 이상 선택해 주세요.');
+      return;
+    }
+
+    const summary = [
+      patch.activityCategory ? `· 활동 범주 → ${categoryName(patch.activityCategory)}` : null,
+      patch.count ? `· 필요 인원 → ${patch.count}명` : null,
+      patch.icon ? `· 아이콘 → ${patch.icon}` : null,
+    ].filter(Boolean);
+
+    if (!confirm(`선택한 역할 ${selectedVisible.length}종에 아래 내용을 일괄 적용합니다.\n\n${summary.join('\n')}\n\n계속하시겠습니까?`)) return;
+
+    soundFx.playSuccess();
+    const selected = new Set(selectedVisible);
+    onUpdateRoles(roles.map((r) => (selected.has(r.id) ? { ...r, ...patch } : r)));
+    setBulkCategory('');
+    setBulkCount('');
+    setBulkIcon('');
+  };
+
+  const handleBulkDelete = () => {
+    if (selectedVisible.length === 0) return;
+    if (!confirm(`선택한 역할 ${selectedVisible.length}종을 삭제합니다.\n해당 역할의 현재 배정도 함께 해제됩니다.\n\n계속하시겠습니까?`)) return;
+    soundFx.playClick();
+    const selected = new Set(selectedVisible);
+    onUpdateRoles(roles.filter((r) => !selected.has(r.id)));
+    setSelectedRoleIds([]);
+  };
+
+  // --- 템플릿 ---------------------------------------------------------------
+  const handleLoadPreset = (preset: RolePreset) => {
+    const targetCategory: ActivityCategory = preset.activityCategory || fallbackCategoryId;
+    const targetName = categoryName(targetCategory);
+
+    if (!categories.some((c) => c.id === targetCategory)) {
+      alert(`이 템플릿이 지정한 활동 범주가 존재하지 않습니다.\n템플릿을 수정해 현재 사용 중인 범주를 지정해 주세요.`);
+      return;
+    }
+
+    const existingInCategory = roles.filter((r) => (r.activityCategory || fallbackCategoryId) === targetCategory);
     // 이름이 같은 역할은 기존 ID 를 재사용해서, 이미 배정된 학생들이 '미배정'으로 떨어지지 않게 한다.
     const idByTitle = new Map(existingInCategory.map((r) => [r.title.trim(), r.id]));
     const reusableCount = preset.roles.filter((r) => idByTitle.has(r.title.trim())).length;
 
     const lines = [
-      `'${preset.name}' 템플릿을 [${categoryName}] 범주에 적용합니다.`,
+      `'${preset.name}' 템플릿을 [${targetName}] 범주에 적용합니다.`,
       '',
       `· 기존 역할 ${existingInCategory.length}종 → 템플릿 ${preset.roles.length}종으로 교체`,
       reusableCount > 0
@@ -165,15 +334,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       return { ...r, id, activityCategory: targetCategory };
     });
 
-    const otherRoles = roles.filter((r) => (r.activityCategory || 'daily') !== targetCategory);
+    const otherRoles = roles.filter((r) => (r.activityCategory || fallbackCategoryId) !== targetCategory);
     onUpdateRoles([...otherRoles, ...loadedRoles]);
   };
 
-  const handleDeleteCustomPreset = (id: string) => {
-    if (confirm('이 템플릿을 삭제하시겠습니까?')) {
+  const handleDeleteCustomPreset = (preset: RolePreset) => {
+    if (confirm(`'${preset.name}' 템플릿을 삭제하시겠습니까?\n이미 적용된 역할 목록은 그대로 남습니다.`)) {
       soundFx.playClick();
-      onUpdateCustomPresets(customPresets.filter((p) => p.id !== id));
+      onUpdateCustomPresets(customPresets.filter((p) => p.id !== preset.id));
     }
+  };
+
+  /** 기본 제공 템플릿을 내 템플릿으로 복제해서 자유롭게 수정하도록 한다. */
+  const handleDuplicatePreset = (preset: RolePreset) => {
+    soundFx.playClick();
+    onOpenPresetModal({
+      ...preset,
+      id: `preset_custom_${Date.now()}`,
+      name: `${preset.name} (복사본)`,
+      isCustom: true,
+      createdAt: new Date().toISOString(),
+      roles: preset.roles.map((r) => ({ ...r })),
+    });
   };
 
   // Export / Import
@@ -219,63 +401,40 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     reader.readAsText(file);
   };
 
+  const tabButton = (id: SettingsTab, label: string, Icon: typeof Users, iconClass = '') => (
+    <button
+      onClick={() => setActiveTab(id)}
+      className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition ${
+        activeTab === id ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'
+      }`}
+    >
+      <Icon className={`w-4 h-4 ${activeTab === id ? '' : iconClass}`} /> {label}
+    </button>
+  );
+
   return (
     <div className="space-y-8 animate-pop">
-      
+
       {/* Header */}
       <div className="p-6 rounded-3xl glass-panel border border-slate-700/60 shadow-xl">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-extrabold text-white">⚙️ 교사 통합 설정 & 데이터 관리</h2>
-            <p className="text-sm text-slate-400">학생 명단, 역할 목록, Firebase 클라우드, 나만의 템플릿 및 JSON 관리를 수행합니다.</p>
+            <h2 className="text-2xl font-extrabold text-white">⚙️ 교사 통합 설정 &amp; 데이터 관리</h2>
+            <p className="text-sm text-slate-400">학생 명단, 활동 범주와 기간, 역할 목록, 클라우드, 템플릿 및 JSON 관리를 수행합니다.</p>
           </div>
 
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
-            <button
-              onClick={() => setActiveTab('students')}
-              className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition ${
-                activeTab === 'students' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'
-              }`}
-            >
-              <Users className="w-4 h-4" /> 학생 명단 ({students.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('roles')}
-              className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition ${
-                activeTab === 'roles' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'
-              }`}
-            >
-              <Briefcase className="w-4 h-4" /> 역할 관리 ({roles.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('presets')}
-              className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition ${
-                activeTab === 'presets' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'
-              }`}
-            >
-              <Layers className="w-4 h-4 text-amber-400" /> 템플릿 생성기
-            </button>
-            <button
-              onClick={() => setActiveTab('cloud')}
-              className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition ${
-                activeTab === 'cloud' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'
-              }`}
-            >
-              <Cloud className="w-4 h-4 text-emerald-400" /> 클라우드 Sync
-            </button>
-            <button
-              onClick={() => setActiveTab('backup')}
-              className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition ${
-                activeTab === 'backup' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'
-              }`}
-            >
-              <Download className="w-4 h-4 text-cyan-400" /> JSON 백업
-            </button>
+            {tabButton('students', `학생 명단 (${students.length})`, Users)}
+            {tabButton('categories', `활동 범주 (${categories.length})`, Tag, 'text-rose-400')}
+            {tabButton('roles', `역할 관리 (${roles.length})`, Briefcase)}
+            {tabButton('presets', '템플릿 생성기', Layers, 'text-amber-400')}
+            {tabButton('cloud', '클라우드 Sync', Cloud, 'text-emerald-400')}
+            {tabButton('backup', 'JSON 백업', Download, 'text-cyan-400')}
           </div>
         </div>
       </div>
 
-      {/* TAB 1: Students Management */}
+      {/* ══ TAB 1: 학생 명단 ══════════════════════════════════════════ */}
       {activeTab === 'students' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="space-y-6">
@@ -391,20 +550,248 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       )}
 
-      {/* TAB 2: Roles Management */}
-      {activeTab === 'roles' && (
+      {/* ══ TAB 2: 활동 범주 설정 ═══════════════════════════════════ */}
+      {activeTab === 'categories' && (
         <div className="space-y-6">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h3 className="text-lg font-bold text-white">학급 및 과목별 역할 목록 ({roles.length}종)</h3>
-              <p className="text-xs text-slate-400">활동 범주(1인 1역, 아침활동, 과목별 역할, 프로젝트 학습 등)를 지정하여 역할을 작성합니다.</p>
+              <h3 className="text-lg font-bold text-white">활동 범주 &amp; 운영 기간 설정 ({categories.length}종)</h3>
+              <p className="text-xs text-slate-400">
+                범주를 직접 추가·수정·삭제하고, 활동마다 시작일과 종료일을 지정할 수 있습니다. 기간은 현황판과 헤더에 함께 표시됩니다.
+              </p>
+            </div>
+            <button
+              onClick={handleOpenNewCategory}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-lg shadow-rose-600/30 transition shrink-0"
+            >
+              <Plus className="w-4 h-4" /> 새 활동 범주 추가
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            {categories.map((cat, index) => {
+              const palette = paletteOf(cat.color);
+              const period = getPeriodInfo(cat, getTodayKey());
+              return (
+                <div
+                  key={cat.id}
+                  className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center gap-4"
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <span className={`p-2.5 rounded-xl border shrink-0 ${palette.badge}`}>
+                      <RoleIcon name={cat.icon} className="w-5 h-5" />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h4 className="font-bold text-white truncate">{cat.name}</h4>
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-slate-800 text-slate-400 border border-slate-700">
+                          역할 {rolesInCategory(cat.id)}종
+                        </span>
+                        <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-lg border ${PERIOD_BADGE_CLASS[period.status]}`}>
+                          <CalendarClock className="w-3 h-3" />
+                          {period.rangeLabel ? `${period.rangeLabel} · ${period.label}` : '상시 운영'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1 line-clamp-1">{cat.description || '설명 없음'}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => handleMoveCategory(index, -1)}
+                      disabled={index === 0}
+                      title="위로 이동"
+                      className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition"
+                    >
+                      <ArrowUp className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleMoveCategory(index, 1)}
+                      disabled={index === categories.length - 1}
+                      title="아래로 이동"
+                      className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition"
+                    >
+                      <ArrowDown className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        soundFx.playClick();
+                        setIsNewCategory(false);
+                        setEditingCategory({ ...cat });
+                      }}
+                      title="범주 수정"
+                      className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                    >
+                      <Edit className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteCategory(cat)}
+                      title="범주 삭제"
+                      className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* 범주 편집 모달 */}
+          {editingCategory && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-pop">
+              <div className="w-full max-w-xl bg-slate-900 border border-slate-700 rounded-3xl p-6 sm:p-8 space-y-6 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                  <h3 className="text-xl font-bold text-white">
+                    {isNewCategory ? '새 활동 범주 만들기' : '활동 범주 수정'}
+                  </h3>
+                  <button
+                    onClick={() => { setEditingCategory(null); setIsNewCategory(false); }}
+                    className="p-2 text-slate-400 hover:text-white"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSaveCategory} className="space-y-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 mb-1 block">범주 이름</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="예: 2학기 학급 동아리"
+                      value={editingCategory.name}
+                      onChange={(e) => setEditingCategory({ ...editingCategory, name: e.target.value })}
+                      className="w-full bg-slate-800 text-white text-sm px-4 py-2.5 rounded-xl border border-slate-700 focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 mb-1 block">범주 설명</label>
+                    <textarea
+                      rows={2}
+                      placeholder="이 활동이 무엇인지 짧게 설명해 주세요."
+                      value={editingCategory.description}
+                      onChange={(e) => setEditingCategory({ ...editingCategory, description: e.target.value })}
+                      className="w-full bg-slate-800 text-white text-sm p-3 rounded-xl border border-slate-700"
+                    />
+                  </div>
+
+                  {/* 활동 기간 */}
+                  <div className="p-4 rounded-2xl bg-slate-800/50 border border-slate-800 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <CalendarClock className="w-4 h-4 text-emerald-400" />
+                      <span className="text-xs font-bold text-slate-200">활동 운영 기간</span>
+                      <span className="text-[11px] text-slate-500">비워 두면 상시 운영으로 표시됩니다.</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-400 mb-1 block">시작일</label>
+                        <input
+                          type="date"
+                          value={editingCategory.startDate || ''}
+                          onChange={(e) => setEditingCategory({ ...editingCategory, startDate: e.target.value })}
+                          className="w-full bg-slate-800 text-white text-xs px-3 py-2 rounded-xl border border-slate-700"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-400 mb-1 block">종료일</label>
+                        <input
+                          type="date"
+                          value={editingCategory.endDate || ''}
+                          onChange={(e) => setEditingCategory({ ...editingCategory, endDate: e.target.value })}
+                          className="w-full bg-slate-800 text-white text-xs px-3 py-2 rounded-xl border border-slate-700"
+                        />
+                      </div>
+                    </div>
+                    {(editingCategory.startDate || editingCategory.endDate) && (
+                      <button
+                        type="button"
+                        onClick={() => setEditingCategory({ ...editingCategory, startDate: '', endDate: '' })}
+                        className="text-[11px] font-bold text-slate-400 hover:text-white"
+                      >
+                        기간 지우고 상시 운영으로 되돌리기
+                      </button>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 mb-2 block">색상</label>
+                    <div className="flex flex-wrap gap-2">
+                      {Object.entries(CATEGORY_PALETTES).map(([key, p]) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setEditingCategory({ ...editingCategory, color: key })}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition ${
+                            editingCategory.color === key
+                              ? 'bg-slate-700 text-white border-slate-500 ring-2 ring-indigo-500'
+                              : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+                          }`}
+                        >
+                          <span className={`w-3 h-3 rounded-full ${p.dot}`} />
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 mb-2 block">아이콘</label>
+                    <div className="grid grid-cols-7 gap-2 max-h-36 overflow-y-auto p-2 bg-slate-800/50 rounded-2xl border border-slate-800">
+                      {AVAILABLE_ICONS.map((iconName) => (
+                        <button
+                          key={iconName}
+                          type="button"
+                          onClick={() => setEditingCategory({ ...editingCategory, icon: iconName })}
+                          className={`p-2.5 rounded-xl flex items-center justify-center transition ${
+                            editingCategory.icon === iconName
+                              ? 'bg-indigo-600 text-white shadow ring-2 ring-indigo-400'
+                              : 'bg-slate-800 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          <RoleIcon name={iconName} className="w-5 h-5" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => { setEditingCategory(null); setIsNewCategory(false); }}
+                      className="px-4 py-2 rounded-xl bg-slate-800 text-slate-400 text-xs font-bold"
+                    >
+                      취소
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-6 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/30"
+                    >
+                      저장하기
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══ TAB 3: 역할 관리 ═══════════════════════════════════════ */}
+      {activeTab === 'roles' && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-bold text-white">역할 관리 ({roles.length}종)</h3>
+              <p className="text-xs text-slate-400">활동 범주로 걸러 보고, 개별 수정·삭제하거나 여러 개를 선택해 한 번에 바꿀 수 있습니다.</p>
             </div>
             <button
               onClick={() =>
                 setEditingRole({
                   title: '',
                   category: 'cleaning',
-                  activityCategory: activeCategory || 'daily',
+                  activityCategory: roleCategoryFilter !== 'all' ? roleCategoryFilter : (activeCategory || fallbackCategoryId),
                   icon: 'Sparkles',
                   color: 'indigo',
                   description: '',
@@ -412,55 +799,202 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   sopSteps: ['1단계 지침'],
                 })
               }
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-lg shadow-indigo-600/30 transition"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-lg shadow-indigo-600/30 transition shrink-0"
             >
               <Plus className="w-4 h-4" /> 새 역할 추가
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {roles.map((role) => {
-              const catConfig = ACTIVITY_CATEGORIES.find((c) => c.id === role.activityCategory);
-              return (
-                <div key={role.id} className="p-5 rounded-3xl bg-slate-900 border border-slate-800 flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-slate-800 text-indigo-300 border border-slate-700">
-                        {catConfig?.name || '1인 1역'}
-                      </span>
+          {/* 필터 바 */}
+          <div className="flex flex-col lg:flex-row lg:items-center gap-3 p-3 rounded-2xl bg-slate-800/40 border border-slate-800">
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0">
+              <button
+                onClick={() => setRoleCategoryFilter('all')}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg whitespace-nowrap transition ${
+                  roleCategoryFilter === 'all' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-400 hover:text-white'
+                }`}
+              >
+                전체 ({roles.length})
+              </button>
+              {categories.map((cat) => {
+                const count = rolesInCategory(cat.id);
+                const palette = paletteOf(cat.color);
+                return (
+                  <button
+                    key={cat.id}
+                    onClick={() => setRoleCategoryFilter(cat.id)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg whitespace-nowrap border transition ${
+                      roleCategoryFilter === cat.id ? palette.activeChip : palette.chip
+                    }`}
+                  >
+                    <RoleIcon name={cat.icon} className="w-3.5 h-3.5" />
+                    {cat.name} ({count})
+                  </button>
+                );
+              })}
+            </div>
 
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => setEditingRole(role)}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteRole(role.id)}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-3 mb-2">
-                      <div className="p-2.5 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                        <RoleIcon name={role.icon} className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-white text-lg">{role.title}</h4>
-                        <span className="text-xs text-slate-400">필요 인원: {role.count}명</span>
-                      </div>
-                    </div>
-
-                    <p className="text-xs text-slate-300 leading-relaxed mb-3">{role.description}</p>
-                  </div>
-                </div>
-              );
-            })}
+            <div className="relative flex-1 min-w-[180px] lg:ml-auto">
+              <Search className="absolute left-3 top-2 w-3.5 h-3.5 text-slate-400" />
+              <input
+                type="text"
+                placeholder="역할 이름 · 설명 · 과목 검색..."
+                value={roleSearch}
+                onChange={(e) => setRoleSearch(e.target.value)}
+                className="w-full bg-slate-800 text-slate-100 text-xs pl-8 pr-3 py-1.5 rounded-lg border border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder-slate-500"
+              />
+            </div>
           </div>
+
+          {/* 선택 & 일괄 수정 바 */}
+          <div className="flex flex-col xl:flex-row xl:items-center gap-3 p-3 rounded-2xl bg-slate-900 border border-slate-800">
+            <button
+              onClick={toggleSelectAllVisible}
+              disabled={visibleRoles.length === 0}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-800 text-slate-300 hover:text-white border border-slate-700 disabled:opacity-40 transition shrink-0"
+            >
+              {allVisibleSelected ? <CheckSquare className="w-4 h-4 text-indigo-400" /> : <Square className="w-4 h-4" />}
+              {allVisibleSelected ? '전체 선택 해제' : `보이는 ${visibleRoles.length}종 전체 선택`}
+            </button>
+
+            <span className="text-xs font-bold text-slate-400 shrink-0">
+              선택됨 <span className="text-indigo-300">{selectedVisible.length}</span>종
+            </span>
+
+            {selectedVisible.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-2 xl:ml-auto">
+                <select
+                  value={bulkCategory}
+                  onChange={(e) => setBulkCategory(e.target.value)}
+                  className="bg-slate-800 text-slate-100 text-xs font-bold px-2.5 py-1.5 rounded-lg border border-slate-700 max-w-[180px]"
+                >
+                  <option value="">활동 범주 변경 안 함</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>→ {c.name}</option>
+                  ))}
+                </select>
+
+                <input
+                  type="number"
+                  min={1}
+                  max={40}
+                  placeholder="인원"
+                  value={bulkCount}
+                  onChange={(e) => setBulkCount(e.target.value)}
+                  className="w-20 bg-slate-800 text-slate-100 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700"
+                  title="선택한 역할의 필요 인원을 일괄 설정"
+                />
+
+                <select
+                  value={bulkIcon}
+                  onChange={(e) => setBulkIcon(e.target.value)}
+                  className="bg-slate-800 text-slate-100 text-xs font-bold px-2.5 py-1.5 rounded-lg border border-slate-700"
+                >
+                  <option value="">아이콘 변경 안 함</option>
+                  {AVAILABLE_ICONS.map((i) => (
+                    <option key={i} value={i}>{i}</option>
+                  ))}
+                </select>
+
+                <button
+                  onClick={handleBulkApply}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow transition"
+                >
+                  <Wand2 className="w-3.5 h-3.5" /> 선택 항목 일괄 적용
+                </button>
+
+                <button
+                  onClick={handleBulkDelete}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 text-xs font-bold border border-rose-500/40 transition"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> 선택 삭제
+                </button>
+
+                <button
+                  onClick={() => setSelectedRoleIds([])}
+                  className="px-2 py-1.5 text-xs font-bold text-slate-400 hover:text-white"
+                >
+                  선택 해제
+                </button>
+              </div>
+            ) : (
+              <span className="text-[11px] text-slate-500 xl:ml-auto">
+                역할을 선택하면 활동 범주 · 필요 인원 · 아이콘을 한 번에 바꿀 수 있습니다.
+              </span>
+            )}
+          </div>
+
+          {/* 역할 목록 */}
+          {visibleRoles.length > 0 ? (
+            <div className="space-y-2">
+              {visibleRoles.map((role) => {
+                const catId = role.activityCategory || fallbackCategoryId;
+                const cat = categories.find((c) => c.id === catId);
+                const palette = paletteOf(cat?.color);
+                const isSelected = selectedRoleIds.includes(role.id);
+                return (
+                  <div
+                    key={role.id}
+                    className={`flex items-center gap-3 p-3 rounded-2xl border transition ${
+                      isSelected ? 'bg-indigo-950/40 border-indigo-500/50' : 'bg-slate-900 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <button
+                      onClick={() => toggleSelectRole(role.id)}
+                      aria-pressed={isSelected}
+                      className="p-1 shrink-0 text-slate-500 hover:text-indigo-300 transition"
+                      title="이 역할 선택"
+                    >
+                      {isSelected ? <CheckSquare className="w-5 h-5 text-indigo-400" /> : <Square className="w-5 h-5" />}
+                    </button>
+
+                    <span className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shrink-0">
+                      <RoleIcon name={role.icon} className="w-4 h-4" />
+                    </span>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h4 className="font-bold text-white text-sm truncate">{role.title}</h4>
+                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-lg border ${palette.badge}`}>
+                          {cat?.name || '미분류 범주'}
+                        </span>
+                        {role.subjectName && (
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-slate-800 text-slate-400 border border-slate-700">
+                            {role.subjectName}
+                          </span>
+                        )}
+                        <span className="text-[11px] font-bold text-slate-500">{role.count}명</span>
+                      </div>
+                      <p className="text-xs text-slate-400 truncate mt-0.5">{role.description || '설명 없음'}</p>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => setEditingRole(role)}
+                        title="개별 수정"
+                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteRole(role.id)}
+                        title="개별 삭제"
+                        className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-16 bg-slate-900/60 rounded-3xl border border-slate-800 text-slate-400 text-sm">
+              {roles.length === 0
+                ? '등록된 역할이 없습니다. [새 역할 추가] 또는 [템플릿 생성기]에서 시작해 보세요.'
+                : '조건에 맞는 역할이 없습니다. 필터나 검색어를 확인해 주세요.'}
+            </div>
+          )}
 
           {/* Edit Role Modal */}
           {editingRole && (
@@ -476,16 +1010,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
 
                 <form onSubmit={handleSaveRole} className="space-y-4">
-                  
+
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="text-xs font-bold text-slate-400 mb-1 block">활동 범주 (Category)</label>
                       <select
-                        value={editingRole.activityCategory || 'daily'}
-                        onChange={(e) => setEditingRole({ ...editingRole, activityCategory: e.target.value as ActivityCategory })}
+                        value={editingRole.activityCategory || fallbackCategoryId}
+                        onChange={(e) => setEditingRole({ ...editingRole, activityCategory: e.target.value })}
                         className="w-full bg-slate-800 text-white text-xs px-3.5 py-2.5 rounded-xl border border-slate-700"
                       >
-                        {ACTIVITY_CATEGORIES.map((cat) => (
+                        {categories.map((cat) => (
                           <option key={cat.id} value={cat.id}>{cat.name}</option>
                         ))}
                       </select>
@@ -520,7 +1054,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       <input
                         type="number"
                         min={1}
-                        max={10}
+                        max={40}
                         value={editingRole.count || 1}
                         onChange={(e) => setEditingRole({ ...editingRole, count: parseInt(e.target.value) || 1 })}
                         className="w-full bg-slate-800 text-white text-sm px-4 py-2 rounded-xl border border-slate-700"
@@ -559,6 +1093,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     />
                   </div>
 
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 mb-1 block">
+                      역할 수행 지침 (SOP) — 한 줄에 한 단계씩
+                    </label>
+                    <textarea
+                      rows={3}
+                      placeholder={`쉬는 시간 종이 울리면 칠판을 지웁니다.\n분필 가루를 텁니다.`}
+                      value={(editingRole.sopSteps || []).join('\n')}
+                      onChange={(e) =>
+                        setEditingRole({
+                          ...editingRole,
+                          sopSteps: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean),
+                        })
+                      }
+                      className="w-full bg-slate-800 text-white text-xs p-3 rounded-xl border border-slate-700"
+                    />
+                  </div>
+
                   <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
                     <button
                       type="button"
@@ -581,15 +1133,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       )}
 
-      {/* TAB 3: Custom Presets & Builtin Templates */}
+      {/* ══ TAB 4: 템플릿 보관함 ═══════════════════════════════════ */}
       {activeTab === 'presets' && (
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h3 className="text-lg font-bold text-white">학급 & 과목별 역할 템플릿 보관함</h3>
-              <p className="text-xs text-slate-400">직접 제작한 나만의 템플릿과 추천 기본 세트를 1-Click 적용합니다.</p>
+              <h3 className="text-lg font-bold text-white">학급 &amp; 과목별 역할 템플릿 보관함</h3>
+              <p className="text-xs text-slate-400">
+                내가 만든 템플릿은 언제든 수정·삭제할 수 있고, 기본 제공 템플릿은 복제해서 내 템플릿으로 고칠 수 있습니다.
+              </p>
             </div>
-            
+
             <button
               onClick={() => onOpenPresetModal(null)}
               className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs shadow-lg shadow-amber-600/30 transition shrink-0"
@@ -599,60 +1153,98 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {allPresets.map((preset) => (
-              <div key={preset.id} className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-4 relative">
-                {preset.isCustom && (
-                  <span className="absolute top-4 right-4 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                    사용자 제작 템플릿
+            {allPresets.map((preset) => {
+              const targetCat = categories.find((c) => c.id === preset.activityCategory);
+              return (
+                <div key={preset.id} className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-4 relative">
+                  <span className={`absolute top-4 right-4 text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                    preset.isCustom
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      : 'bg-slate-800 text-slate-400 border-slate-700'
+                  }`}>
+                    {preset.isCustom ? '내 템플릿' : '기본 제공'}
                   </span>
-                )}
 
-                <div className="flex items-start justify-between gap-4 pr-16">
-                  <div>
+                  <div className="pr-24">
                     <h4 className="text-xl font-bold text-white">{preset.name}</h4>
-                    <span className="inline-block mt-1 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300">
-                      {preset.targetCount}
-                    </span>
-                  </div>
-                </div>
-
-                <p className="text-xs text-slate-300">{preset.description}</p>
-
-                <div className="pt-3 border-t border-slate-800">
-                  <span className="text-xs font-bold text-slate-400 block mb-2">포함 역할 ({preset.roles.length}종):</span>
-                  <div className="flex flex-wrap gap-1.5 mb-4">
-                    {preset.roles.map((r, i) => (
-                      <span key={i} className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 border border-slate-700">
-                        {r.title}
+                    <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                      <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300">
+                        {preset.targetCount}
                       </span>
-                    ))}
+                      <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full border ${
+                        targetCat
+                          ? 'bg-slate-800 text-slate-300 border-slate-700'
+                          : 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+                      }`}>
+                        {targetCat ? `적용 대상: ${targetCat.name}` : '⚠ 없는 활동 범주'}
+                      </span>
+                    </div>
                   </div>
 
-                  <div className="flex items-center justify-between">
-                    {preset.isCustom && (
-                      <button
-                        onClick={() => handleDeleteCustomPreset(preset.id)}
-                        className="text-xs text-rose-400 hover:text-rose-300 font-semibold"
-                      >
-                        템플릿 삭제
-                      </button>
-                    )}
+                  <p className="text-xs text-slate-300">{preset.description}</p>
 
-                    <button
-                      onClick={() => handleLoadPreset(preset)}
-                      className="ml-auto flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 transition"
-                    >
-                      <BookOpen className="w-4 h-4" /> 이 템플릿 적용하기
-                    </button>
+                  <div className="pt-3 border-t border-slate-800">
+                    <span className="text-xs font-bold text-slate-400 block mb-2">포함 역할 ({preset.roles.length}종):</span>
+                    <div className="flex flex-wrap gap-1.5 mb-4">
+                      {preset.roles.map((r, i) => (
+                        <span key={i} className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 border border-slate-700">
+                          {r.title}
+                          {r.count > 1 && <b className="text-slate-500"> ×{r.count}</b>}
+                        </span>
+                      ))}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {preset.isCustom ? (
+                        <>
+                          <button
+                            onClick={() => {
+                              soundFx.playClick();
+                              onOpenPresetModal(preset);
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 transition"
+                          >
+                            <Edit className="w-3.5 h-3.5" /> 템플릿 수정
+                          </button>
+                          <button
+                            onClick={() => handleDuplicatePreset(preset)}
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 transition"
+                          >
+                            <Copy className="w-3.5 h-3.5" /> 복제
+                          </button>
+                          <button
+                            onClick={() => handleDeleteCustomPreset(preset)}
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-600/15 hover:bg-rose-600/30 text-rose-300 font-bold text-xs border border-rose-500/40 transition"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" /> 삭제
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => handleDuplicatePreset(preset)}
+                          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 transition"
+                          title="기본 템플릿은 직접 수정할 수 없으므로 복제본을 만들어 편집합니다."
+                        >
+                          <Copy className="w-3.5 h-3.5" /> 복제해서 수정
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => handleLoadPreset(preset)}
+                        className="ml-auto flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 transition"
+                      >
+                        <BookOpen className="w-4 h-4" /> 적용하기
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
 
-      {/* TAB 4: Firebase Cloud Sync */}
+      {/* ══ TAB 5: 클라우드 Sync ═══════════════════════════════════ */}
       {activeTab === 'cloud' && (
         <div className="p-6 sm:p-8 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-6">
           <div className="flex items-start justify-between">
@@ -746,7 +1338,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       )}
 
-      {/* TAB 5: Backup & JSON */}
+      {/* ══ TAB 6: 백업 ═══════════════════════════════════════════ */}
       {activeTab === 'backup' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">
@@ -757,7 +1349,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <div>
                 <h4 className="text-lg font-bold text-white">통합 JSON 데이터 백업 다운로드</h4>
                 <p className="text-xs text-slate-400">
-                  학생 명단, 역할 목록, 커스텀 템플릿, 활동별 체크 이력, 역할 배정 이력을 JSON 파일로 보관합니다.
+                  학생 명단, 활동 범주와 기간, 역할 목록, 커스텀 템플릿, 활동별 체크 이력, 역할 배정 이력을 JSON 파일로 보관합니다.
                   <span className="block mt-1 text-slate-500">보안을 위해 Firebase 접속 정보는 백업에 포함되지 않습니다.</span>
                 </p>
               </div>

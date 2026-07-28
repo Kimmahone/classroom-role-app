@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { RolePreset, Role, ActivityCategory, ACTIVITY_CATEGORIES } from '../types';
+import { RolePreset, Role, ActivityCategory, ActivityCategoryConfig } from '../types';
 import { RoleIcon, AVAILABLE_ICONS } from './RoleIcon';
 import { soundFx } from '../utils/sound';
 import { X, Plus, Trash2, Layers } from 'lucide-react';
@@ -7,6 +7,8 @@ import { X, Plus, Trash2, Layers } from 'lucide-react';
 interface PresetEditorModalProps {
   preset: RolePreset | null; // null if creating new
   currentRoles: Role[];
+  categories: ActivityCategoryConfig[];
+  defaultCategory: ActivityCategory;
   onSavePreset: (newPreset: RolePreset) => void;
   onClose: () => void;
 }
@@ -14,15 +16,27 @@ interface PresetEditorModalProps {
 export const PresetEditorModal: React.FC<PresetEditorModalProps> = ({
   preset,
   currentRoles,
+  categories,
+  defaultCategory,
   onSavePreset,
   onClose,
 }) => {
+  const initialCategory =
+    preset?.activityCategory && categories.some((c) => c.id === preset.activityCategory)
+      ? preset.activityCategory
+      : defaultCategory;
+
   const [name, setName] = useState(preset?.name || '');
   const [description, setDescription] = useState(preset?.description || '');
   const [targetCount, setTargetCount] = useState(preset?.targetCount || '20명 학급용');
-  const [activityCategory, setActivityCategory] = useState<ActivityCategory>(preset?.activityCategory || 'daily');
+  const [activityCategory, setActivityCategory] = useState<ActivityCategory>(initialCategory);
   const [rolesList, setRolesList] = useState<Omit<Role, 'id'>[]>(
-    preset ? preset.roles : currentRoles.map(({ id: _, ...rest }) => rest)
+    // 새 템플릿은 '현재 선택된 범주'의 역할만 초안으로 가져온다.
+    preset
+      ? preset.roles.map((r) => ({ ...r }))
+      : currentRoles
+          .filter((r) => (r.activityCategory || defaultCategory) === defaultCategory)
+          .map(({ id: _id, ...rest }) => rest)
   );
 
   const handleAddRoleItem = () => {
@@ -64,7 +78,8 @@ export const PresetEditorModal: React.FC<PresetEditorModalProps> = ({
       description: description.trim(),
       targetCount: targetCount.trim(),
       activityCategory,
-      roles: rolesList,
+      // 템플릿 안의 역할들도 템플릿이 지정한 범주를 따르게 맞춰 둔다.
+      roles: rolesList.map((r) => ({ ...r, activityCategory })),
       isCustom: true,
       createdAt: preset?.createdAt || new Date().toISOString(),
     };
@@ -116,7 +131,7 @@ export const PresetEditorModal: React.FC<PresetEditorModalProps> = ({
                 onChange={(e) => setActivityCategory(e.target.value as ActivityCategory)}
                 className="w-full bg-slate-800 text-white text-xs px-3.5 py-2.5 rounded-xl border border-slate-700 focus:ring-2 focus:ring-indigo-500"
               >
-                {ACTIVITY_CATEGORIES.map((cat) => (
+                {categories.map((cat) => (
                   <option key={cat.id} value={cat.id}>
                     {cat.name}
                   </option>

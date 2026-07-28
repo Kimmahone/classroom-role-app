@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Student, Role, Assignment, DailyStatusHistory, ViewMode, ActivityCategory, RolePreset,
-  FirebaseConfig, UserProfile, RoleHistoryRecord, SyncState
+  FirebaseConfig, UserProfile, RoleHistoryRecord, SyncState, ActivityCategoryConfig
 } from './types';
 import {
   loadStudents, saveStudents,
@@ -11,9 +11,11 @@ import {
   loadCustomPresets, saveCustomPresets,
   loadFirebaseConfig, saveFirebaseConfig,
   loadActiveCategory, saveActiveCategory,
+  loadCategories, saveCategories, normalizeCategories,
   loadRoleHistory, saveRoleHistory, mergeRoleHistory,
   getTodayKey
 } from './utils/storage';
+import { findCategory } from './utils/category';
 import {
   initFirebase, subscribeToClassroomData, saveClassroomDataToCloud,
   loginWithGoogle, logoutGoogle, subscribeToAuthChanges, consumeRedirectResult
@@ -41,7 +43,14 @@ export function App() {
   const [roleHistory, setRoleHistory] = useState<RoleHistoryRecord[]>([]);
   const [firebaseConfig, setFirebaseConfigState] = useState<FirebaseConfig>(loadFirebaseConfig());
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [activeCategory, setActiveCategoryState] = useState<ActivityCategory>(loadActiveCategory());
+  const [categories, setCategories] = useState<ActivityCategoryConfig[]>(loadCategories());
+  const [activeCategoryRaw, setActiveCategoryState] = useState<ActivityCategory>(loadActiveCategory());
+
+  // 삭제된 범주가 선택된 채로 남아 화면이 비어 보이는 것을 막는다.
+  const activeCategory = categories.some((c) => c.id === activeCategoryRaw)
+    ? activeCategoryRaw
+    : (categories[0]?.id ?? 'daily');
+  const activeCategoryConfig = findCategory(categories, activeCategory);
 
   // UI & Modal State
   const [currentMode, setCurrentMode] = useState<ViewMode>('dashboard');
@@ -86,6 +95,7 @@ export function App() {
     setCustomPresets(loadCustomPresets());
     setRoleHistory(loadRoleHistory());
     setFirebaseConfigState(loadedFc);
+    setCategories(loadCategories());
     setActiveCategoryState(loadActiveCategory());
 
     if (loadedFc.enabled && loadedFc.apiKey) {
@@ -107,8 +117,9 @@ export function App() {
       dailyStatus: dailyStatusHistory,
       customPresets,
       roleHistory,
+      categories,
     };
-  }, [students, roles, assignments, dailyStatusHistory, customPresets, roleHistory]);
+  }, [students, roles, assignments, dailyStatusHistory, customPresets, roleHistory, categories]);
 
   const scheduleCloudSync = useCallback(() => {
     if (!cloudEnabled) return;
@@ -182,6 +193,11 @@ export function App() {
         if (cloudData.dailyStatus && typeof cloudData.dailyStatus === 'object') {
           setDailyStatusHistory(cloudData.dailyStatus as DailyStatusHistory);
           saveDailyStatus(cloudData.dailyStatus as DailyStatusHistory);
+        }
+        if (Array.isArray(cloudData.categories)) {
+          const normalized = normalizeCategories(cloudData.categories);
+          setCategories(normalized);
+          saveCategories(normalized);
         }
         if (Array.isArray(cloudData.customPresets)) {
           setCustomPresets(cloudData.customPresets as RolePreset[]);
@@ -257,6 +273,41 @@ export function App() {
   const handleCategoryChange = (cat: ActivityCategory) => {
     setActiveCategoryState(cat);
     saveActiveCategory(cat);
+  };
+
+  /**
+   * 활동 범주 목록 갱신. 범주가 사라지면 그 범주에 속한 역할/배정도 함께 정리해서
+   * 어디에도 보이지 않는 유령 데이터가 남지 않게 한다. (과거 이력은 보존)
+   */
+  const handleUpdateCategories = (newCategories: ActivityCategoryConfig[]) => {
+    const nextIds = new Set(newCategories.map((c) => c.id));
+    const removedIds = categories.filter((c) => !nextIds.has(c.id)).map((c) => c.id);
+
+    setCategories(newCategories);
+    saveCategories(newCategories);
+
+    if (removedIds.length > 0) {
+      const removed = new Set(removedIds);
+      const fallback = newCategories[0]?.id ?? 'daily';
+
+      const nextRoles = roles.filter((r) => !removed.has(r.activityCategory || fallback));
+      const survivingRoleIds = new Set(nextRoles.map((r) => r.id));
+      setRoles(nextRoles);
+      saveRoles(nextRoles);
+
+      const nextAssignments = assignments.filter(
+        (a) => !removed.has(a.activityCategory || fallback) && survivingRoleIds.has(a.roleId)
+      );
+      setAssignments(nextAssignments);
+      saveAssignments(nextAssignments);
+
+      if (removed.has(activeCategoryRaw)) {
+        setActiveCategoryState(fallback);
+        saveActiveCategory(fallback);
+      }
+    }
+
+    scheduleCloudSync();
   };
 
   // --- Data handlers (참조 무결성 유지) ---------------------------------------
@@ -433,8 +484,10 @@ export function App() {
           onModeChange={setCurrentMode}
           soundEnabled={soundEnabled}
           onToggleSound={handleToggleSound}
+          categories={categories}
           activeCategory={activeCategory}
           onCategoryChange={handleCategoryChange}
+          selectedDate={selectedDate}
           completedRatio={completedRatio}
           syncState={syncState}
           syncError={cloudError}
@@ -454,6 +507,7 @@ export function App() {
             assignments={assignments}
             dailyStatus={currentDailyStatus}
             activeCategory={activeCategory}
+            categoryConfig={activeCategoryConfig}
             selectedDate={selectedDate}
             onDateChange={setSelectedDate}
             onToggleStatus={handleToggleDailyStatus}
@@ -468,6 +522,7 @@ export function App() {
             roles={roles}
             assignments={categoryAssignments}
             dailyStatus={currentDailyStatus}
+            categoryConfig={activeCategoryConfig}
             onToggleStatus={handleToggleDailyStatus}
             onExitTvMode={() => setCurrentMode('dashboard')}
           />
@@ -480,6 +535,8 @@ export function App() {
             assignments={assignments}
             roleHistory={roleHistory}
             activeCategory={activeCategory}
+            categoryConfig={activeCategoryConfig}
+            selectedDate={selectedDate}
             onUpdateAssignments={handleUpdateAssignments}
           />
         )}
@@ -491,6 +548,7 @@ export function App() {
             assignments={assignments}
             dailyStatusHistory={dailyStatusHistory}
             roleHistory={roleHistory}
+            categories={categories}
           />
         )}
 
@@ -500,6 +558,7 @@ export function App() {
             roles={roles}
             customPresets={customPresets}
             firebaseConfig={firebaseConfig}
+            categories={categories}
             activeCategory={activeCategory}
             syncState={syncState}
             syncError={cloudError}
@@ -507,6 +566,7 @@ export function App() {
             onLoginGoogle={handleLoginGoogle}
             onUpdateStudents={handleUpdateStudents}
             onUpdateRoles={handleUpdateRoles}
+            onUpdateCategories={handleUpdateCategories}
             onUpdateCustomPresets={handleUpdateCustomPresets}
             onOpenFirebaseModal={() => setShowFirebaseModal(true)}
             onOpenPresetModal={(p) => setPresetModalData({ open: true, preset: p })}
@@ -536,6 +596,8 @@ export function App() {
         <PresetEditorModal
           preset={presetModalData.preset}
           currentRoles={roles}
+          categories={categories}
+          defaultCategory={activeCategory}
           onSavePreset={(newPreset) => {
             const exists = customPresets.some((p) => p.id === newPreset.id);
             let next: RolePreset[];

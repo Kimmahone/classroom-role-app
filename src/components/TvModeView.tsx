@@ -1,5 +1,5 @@
 import React from 'react';
-import { Student, Role, Assignment, DailyCheck } from '../types';
+import { Student, Role, Assignment, DailyCheck, ActivityCategoryConfig } from '../types';
 import { RoleIcon } from './RoleIcon';
 import { soundFx } from '../utils/sound';
 import confetti from 'canvas-confetti';
@@ -10,6 +10,7 @@ interface TvModeViewProps {
   roles: Role[];
   assignments: Assignment[];
   dailyStatus: DailyCheck;
+  categoryConfig: ActivityCategoryConfig;
   onToggleStatus: (studentId: string) => void;
   onExitTvMode: () => void;
 }
@@ -19,6 +20,7 @@ export const TvModeView: React.FC<TvModeViewProps> = ({
   roles,
   assignments,
   dailyStatus,
+  categoryConfig,
   onToggleStatus,
   onExitTvMode,
 }) => {
@@ -74,9 +76,15 @@ export const TvModeView: React.FC<TvModeViewProps> = ({
               <ArrowLeft className="w-5 h-5" />
               <span>일반 모드로 돌아가기</span>
             </button>
-            <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-indigo-300">
-              📺 교실 TV 역할 현황판
-            </h1>
+            <div>
+              <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-indigo-300">
+                📺 교실 TV 역할 현황판
+              </h1>
+              <span className="inline-flex items-center gap-2 mt-1 text-base font-bold text-slate-400">
+                <RoleIcon name={categoryConfig.icon} className="w-4 h-4" />
+                {categoryConfig.name}
+              </span>
+            </div>
           </div>
 
           <div className="flex items-center gap-4">

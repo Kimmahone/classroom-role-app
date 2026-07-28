@@ -1,5 +1,6 @@
-import { 
-  Student, Role, Assignment, DailyStatusHistory, RoleHistoryRecord, RolePreset, FirebaseConfig, ActivityCategory 
+import {
+  Student, Role, Assignment, DailyStatusHistory, RoleHistoryRecord, RolePreset, FirebaseConfig,
+  ActivityCategory, ActivityCategoryConfig, DEFAULT_ACTIVITY_CATEGORIES
 } from '../types';
 
 export const STORAGE_KEYS = {
@@ -11,6 +12,7 @@ export const STORAGE_KEYS = {
   CUSTOM_PRESETS: 'classroom_role_custom_presets',
   FIREBASE_CONFIG: 'classroom_role_firebase_config',
   ACTIVE_CATEGORY: 'classroom_role_active_category',
+  CATEGORIES: 'classroom_role_categories',
 };
 
 /**
@@ -392,6 +394,40 @@ export const mergeRoleHistory = (
   return Array.from(byKey.values()).sort((a, b) => a.date.localeCompare(b.date));
 };
 
+// --- 활동 범주 (교사가 직접 편집) ---
+const isValidCategory = (v: unknown): v is ActivityCategoryConfig =>
+  typeof v === 'object' && v !== null &&
+  typeof (v as ActivityCategoryConfig).id === 'string' &&
+  typeof (v as ActivityCategoryConfig).name === 'string';
+
+export const normalizeCategories = (list: unknown): ActivityCategoryConfig[] => {
+  if (!Array.isArray(list)) return DEFAULT_ACTIVITY_CATEGORIES;
+  const valid = list.filter(isValidCategory).map((c) => ({
+    id: c.id,
+    name: c.name,
+    icon: c.icon || 'Sparkles',
+    color: c.color || 'indigo',
+    description: c.description || '',
+    startDate: c.startDate || '',
+    endDate: c.endDate || '',
+  }));
+  return valid.length > 0 ? valid : DEFAULT_ACTIVITY_CATEGORIES;
+};
+
+export const loadCategories = (): ActivityCategoryConfig[] => {
+  try {
+    const data = localStorage.getItem(STORAGE_KEYS.CATEGORIES);
+    if (!data) return DEFAULT_ACTIVITY_CATEGORIES;
+    return normalizeCategories(JSON.parse(data));
+  } catch {
+    return DEFAULT_ACTIVITY_CATEGORIES;
+  }
+};
+
+export const saveCategories = (categories: ActivityCategoryConfig[]): void => {
+  localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(categories));
+};
+
 export const loadActiveCategory = (): ActivityCategory => {
   try {
     const cat = localStorage.getItem(STORAGE_KEYS.ACTIVE_CATEGORY);
@@ -425,7 +461,7 @@ export const formatKoreanDate = (dateStr: string): string => {
 // 백업 대상에서 제외한다. (클라우드 설정은 설정 화면에서 직접 입력)
 export const exportDataToJson = (): string => {
   const exportPayload = {
-    version: '3.0',
+    version: '4.0',
     exportDate: new Date().toISOString(),
     students: loadStudents(),
     roles: loadRoles(),
@@ -433,6 +469,7 @@ export const exportDataToJson = (): string => {
     dailyStatus: loadDailyStatus(),
     customPresets: loadCustomPresets(),
     roleHistory: loadRoleHistory(),
+    categories: loadCategories(),
   };
   return JSON.stringify(exportPayload, null, 2);
 };
@@ -457,6 +494,10 @@ const validPresets = (v: unknown): v is RolePreset[] =>
 
 const validHistory = (v: unknown): v is RoleHistoryRecord[] =>
   Array.isArray(v) && v.every((r) => isObject(r) && typeof r.date === 'string' && typeof r.studentId === 'string');
+
+const validCategories = (v: unknown): v is ActivityCategoryConfig[] =>
+  Array.isArray(v) && v.length > 0 &&
+  v.every((c) => isObject(c) && typeof c.id === 'string' && typeof c.name === 'string');
 
 export interface ImportResult {
   success: boolean;
@@ -491,6 +532,7 @@ export const importDataFromJson = (jsonStr: string): ImportResult => {
     }
   };
 
+  apply('categories', '활동 범주', validCategories, (v) => saveCategories(normalizeCategories(v)));
   apply('students', '학생 명단', validStudents, saveStudents);
   apply('roles', '역할 목록', validRoles, saveRoles);
   apply('assignments', '역할 배정', validAssignments, saveAssignments);

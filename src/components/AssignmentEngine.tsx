@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react';
-import { Student, Role, Assignment, ActivityCategory, ACTIVITY_CATEGORIES, RoleHistoryRecord } from '../types';
+import { Student, Role, Assignment, ActivityCategory, ActivityCategoryConfig, RoleHistoryRecord } from '../types';
 import { RoleIcon } from './RoleIcon';
 import { soundFx } from '../utils/sound';
 import confetti from 'canvas-confetti';
-import { Shuffle, RotateCw, Pin, PinOff, Lock, Trash2, UserCheck, Scale } from 'lucide-react';
+import { Shuffle, RotateCw, Pin, PinOff, Lock, Trash2, UserCheck, Scale, CalendarClock } from 'lucide-react';
 import { buildRoleSlots, buildFairnessIndex, assignSlotsFairly } from '../utils/assignment';
+import { getPeriodInfo, PERIOD_BADGE_CLASS } from '../utils/category';
 
 interface AssignmentEngineProps {
   students: Student[];
@@ -12,6 +13,8 @@ interface AssignmentEngineProps {
   assignments: Assignment[];
   roleHistory: RoleHistoryRecord[];
   activeCategory: ActivityCategory;
+  categoryConfig: ActivityCategoryConfig;
+  selectedDate: string;
   onUpdateAssignments: (newAssignments: Assignment[]) => void;
 }
 
@@ -21,13 +24,15 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
   assignments,
   roleHistory,
   activeCategory,
+  categoryConfig,
+  selectedDate,
   onUpdateAssignments,
 }) => {
   const [isShuffling, setIsShuffling] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [useFairMode, setUseFairMode] = useState(true);
 
-  const categoryConfig = ACTIVITY_CATEGORIES.find((c) => c.id === activeCategory) || ACTIVITY_CATEGORIES[0];
+  const period = getPeriodInfo(categoryConfig, selectedDate);
   const categoryRoles = roles.filter((r) => !r.activityCategory || r.activityCategory === activeCategory);
 
   // --- 이력 기반 공정성 지표 -------------------------------------------------
@@ -167,6 +172,14 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
             <p className="text-sm text-slate-400">
               선택된 범주의 역할({categoryRoles.length}종)에 맞추어 랜덤 셔플 및 순환 배정을 진행합니다.
             </p>
+
+            <span
+              className={`inline-flex items-center gap-1 mt-2 px-2.5 py-1 text-[11px] font-bold rounded-lg border ${PERIOD_BADGE_CLASS[period.status]}`}
+              title={period.rangeLabel ? `운영 기간 ${period.rangeLabel}` : '운영 기간이 지정되지 않았습니다'}
+            >
+              <CalendarClock className="w-3 h-3" />
+              {period.rangeLabel ? `운영 기간 ${period.rangeLabel} · ${period.label}` : '상시 운영'}
+            </span>
 
             {/* 이력 기반 공정 배정 토글 */}
             <button
