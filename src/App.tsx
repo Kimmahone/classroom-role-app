@@ -14,7 +14,10 @@ import {
   loadRoleHistory, saveRoleHistory, mergeRoleHistory,
   getTodayKey
 } from './utils/storage';
-import { initFirebase, subscribeToClassroomData, saveClassroomDataToCloud, loginWithGoogle, logoutGoogle, subscribeToAuthChanges } from './services/firebase';
+import {
+  initFirebase, subscribeToClassroomData, saveClassroomDataToCloud,
+  loginWithGoogle, logoutGoogle, subscribeToAuthChanges, consumeRedirectResult
+} from './services/firebase';
 import { soundFx } from './utils/sound';
 import { Header } from './components/Header';
 import { DashboardView } from './components/DashboardView';
@@ -139,6 +142,13 @@ export function App() {
     }
     initFirebase(firebaseConfig);
     const unsubAuth = subscribeToAuthChanges(setUserProfile);
+
+    // 팝업이 막혀 리디렉션 방식으로 로그인한 경우, 돌아왔을 때의 오류를 표면화한다.
+    consumeRedirectResult().then((result) => {
+      if (result.error) setCloudError(result.error);
+      else if (result.user) soundFx.playSuccess();
+    });
+
     return () => {
       if (unsubAuth) unsubAuth();
     };
@@ -199,15 +209,41 @@ export function App() {
   // --- Auth handlers ---------------------------------------------------------
   const handleLoginGoogle = async () => {
     soundFx.playClick();
-    if (!firebaseConfig.enabled || !firebaseConfig.apiKey) {
-      alert('먼저 [교사 설정 > 클라우드 Sync]에서 클라우드 동기화를 켜주세요.');
+
+    // 동기화가 꺼져 있으면 로그인 의사 자체가 곧 '켜겠다'는 뜻이므로,
+    // 설정 화면으로 돌려보내지 말고 이 자리에서 켜고 바로 로그인까지 진행한다.
+    if (!firebaseConfig.apiKey) {
+      alert('Firebase 접속 정보가 없습니다. [교사 설정 > 클라우드 Sync]에서 먼저 입력해 주세요.');
       setShowFirebaseModal(true);
       return;
     }
-    const user = await loginWithGoogle();
-    if (user) {
+
+    if (!firebaseConfig.enabled) {
+      const ok = confirm(
+        '클라우드 동기화를 켜고 Google 로그인을 진행합니다.\n\n' +
+        '학급 데이터는 선생님 본인 계정에만 저장되며 다른 사용자는 볼 수 없습니다.\n\n계속하시겠습니까?'
+      );
+      if (!ok) return;
+
+      const enabledConfig: FirebaseConfig = { ...firebaseConfig, enabled: true };
+      handleUpdateFirebaseConfig(enabledConfig);
+      // initFirebase 는 handleUpdateFirebaseConfig 안에서 동기적으로 끝나므로 바로 로그인 가능
+    }
+
+    const result = await loginWithGoogle();
+
+    if (result.redirecting) return; // 페이지가 곧 이동함
+
+    if (result.user) {
       soundFx.playSuccess();
-      setUserProfile(user);
+      setUserProfile(result.user);
+      setCloudError(null);
+      return;
+    }
+
+    if (result.error) {
+      setCloudError(result.error);
+      alert(result.error);
     }
   };
 
@@ -327,11 +363,11 @@ export function App() {
   };
 
   const handleUpdateFirebaseConfig = (newConfig: FirebaseConfig) => {
-    setFirebaseConfigState(newConfig);
-    saveFirebaseConfig(newConfig);
+    const stored = saveFirebaseConfig(newConfig);
+    setFirebaseConfigState(stored);
     setCloudError(null);
-    if (newConfig.enabled && newConfig.apiKey) {
-      initFirebase(newConfig);
+    if (stored.enabled && stored.apiKey) {
+      initFirebase(stored);
     }
   };
 

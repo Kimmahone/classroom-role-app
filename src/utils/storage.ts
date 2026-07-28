@@ -352,9 +352,11 @@ export const loadFirebaseConfig = (): FirebaseConfig => {
   }
 };
 
-export const saveFirebaseConfig = (config: FirebaseConfig): void => {
+/** 저장한 설정(스키마 버전이 찍힌 것)을 그대로 돌려주어 화면 상태와 어긋나지 않게 한다. */
+export const saveFirebaseConfig = (config: FirebaseConfig): FirebaseConfig => {
   const stamped: FirebaseConfig = { ...config, configVersion: CURRENT_FIREBASE_CONFIG_VERSION };
   localStorage.setItem(STORAGE_KEYS.FIREBASE_CONFIG, JSON.stringify(stamped));
+  return stamped;
 };
 
 // --- 역할 배정 이력 (RoleHistoryRecord) ---

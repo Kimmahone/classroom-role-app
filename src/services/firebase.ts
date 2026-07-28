@@ -1,6 +1,9 @@
 import { initializeApp, getApps, deleteApp, FirebaseApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, setDoc, onSnapshot, Firestore } from 'firebase/firestore';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, Auth, User } from 'firebase/auth';
+import {
+  getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult,
+  signOut, onAuthStateChanged, Auth, User
+} from 'firebase/auth';
 import { FirebaseConfig, UserProfile } from '../types';
 
 let app: FirebaseApp | null = null;
@@ -94,25 +97,88 @@ export const testFirebaseConnection = async (
 };
 
 // --- Google Authentication ---
-export const loginWithGoogle = async (): Promise<UserProfile | null> => {
+export interface AuthResult {
+  user: UserProfile | null;
+  /** 사용자에게 보여줄 오류 메시지. null 이면 오류 없음. */
+  error: string | null;
+  /** 팝업이 막혀 리디렉션 방식으로 전환된 경우 true (페이지가 곧 이동함) */
+  redirecting?: boolean;
+}
+
+const toProfile = (user: User): UserProfile => ({
+  uid: user.uid,
+  displayName: user.displayName,
+  email: user.email,
+  photoURL: user.photoURL,
+});
+
+/** Firebase 오류 코드를 교사가 이해할 수 있는 안내문으로 바꾼다. */
+const describeAuthError = (err: unknown): string => {
+  const code = (err as { code?: string })?.code || '';
+  const raw = (err as Error)?.message || '알 수 없는 오류';
+  const host = typeof window !== 'undefined' ? window.location.hostname : '';
+
+  switch (code) {
+    case 'auth/unauthorized-domain':
+      return `현재 주소(${host})가 Firebase에 등록되어 있지 않습니다.\n\nFirebase 콘솔 > Authentication > 설정 > 승인된 도메인에 "${host}" 를 추가해 주세요.\n(미리보기 배포 주소는 정식 주소와 별도로 등록해야 합니다.)`;
+    case 'auth/operation-not-allowed':
+      return 'Firebase 콘솔 > Authentication > Sign-in method 에서 Google 로그인이 사용 설정되어 있지 않습니다.';
+    case 'auth/popup-blocked':
+      return '브라우저가 로그인 팝업을 차단했습니다. 주소창의 팝업 차단을 해제한 뒤 다시 시도해 주세요.';
+    case 'auth/popup-closed-by-user':
+    case 'auth/cancelled-popup-request':
+      return '';
+    case 'auth/network-request-failed':
+      return '네트워크 연결에 실패했습니다. 인터넷 상태를 확인해 주세요.';
+    case 'auth/internal-error':
+      return '로그인 처리 중 내부 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
+    default:
+      return `로그인에 실패했습니다.${code ? `\n오류 코드: ${code}` : ''}\n${raw}`;
+  }
+};
+
+export const loginWithGoogle = async (): Promise<AuthResult> => {
   if (!auth) {
-    console.warn('Firebase Auth가 초기화되지 않았습니다.');
-    return null;
+    return {
+      user: null,
+      error: '클라우드 설정이 아직 초기화되지 않았습니다. 설정을 저장한 뒤 다시 시도해 주세요.',
+    };
   }
 
+  const provider = new GoogleAuthProvider();
+
   try {
-    const provider = new GoogleAuthProvider();
     const result = await signInWithPopup(auth, provider);
-    const user = result.user;
-    return {
-      uid: user.uid,
-      displayName: user.displayName,
-      email: user.email,
-      photoURL: user.photoURL,
-    };
+    return { user: toProfile(result.user), error: null };
   } catch (err) {
+    const code = (err as { code?: string })?.code || '';
+
+    // 태블릿/모바일 브라우저에서 팝업이 막히는 경우가 잦아 리디렉션 방식으로 자동 전환한다.
+    if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') {
+      try {
+        await signInWithRedirect(auth, provider);
+        return { user: null, error: null, redirecting: true };
+      } catch (redirectErr) {
+        return { user: null, error: describeAuthError(redirectErr) };
+      }
+    }
+
     console.error('Google Sign-In failed:', err);
-    return null;
+    return { user: null, error: describeAuthError(err) };
+  }
+};
+
+/**
+ * 리디렉션 방식 로그인 후 돌아왔을 때의 결과를 확인한다.
+ * 성공 시에는 onAuthStateChanged 가 이미 처리하므로, 주로 오류를 표면화하는 용도.
+ */
+export const consumeRedirectResult = async (): Promise<AuthResult> => {
+  if (!auth) return { user: null, error: null };
+  try {
+    const result = await getRedirectResult(auth);
+    return { user: result ? toProfile(result.user) : null, error: null };
+  } catch (err) {
+    return { user: null, error: describeAuthError(err) };
   }
 };
 
