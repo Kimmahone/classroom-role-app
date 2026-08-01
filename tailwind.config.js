@@ -15,7 +15,10 @@ export default {
        * 컴포넌트는 slate-900 같은 고정 색 대신 이 토큰만 사용해야 라이트/다크가 함께 동작한다.
        */
       colors: {
-        base: 'rgb(var(--c-base) / <alpha-value>)',
+        // 주의: 색상 키 이름은 Tailwind 기본 유틸리티와 겹치면 안 된다.
+        // 예전에 이 토큰 이름이 'base' 였는데, 그러면 글자 크기 유틸리티인 text-base 가
+        // 색상 유틸리티로도 생성되어 본문 글자가 배경색으로 칠해지는 버그가 있었다.
+        canvas: 'rgb(var(--c-base) / <alpha-value>)',
         surface: 'rgb(var(--c-surface) / <alpha-value>)',
         elevated: 'rgb(var(--c-elevated) / <alpha-value>)',
         hover: 'rgb(var(--c-hover) / <alpha-value>)',

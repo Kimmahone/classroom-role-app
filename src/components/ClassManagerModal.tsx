@@ -21,7 +21,7 @@ export const ClassManagerModal: React.FC<ClassManagerModalProps> = ({
   >
     <div
       onClick={(e) => e.stopPropagation()}
-      className="w-full sm:max-w-3xl bg-base border border-line-strong rounded-t-3xl sm:rounded-3xl p-5 sm:p-7 space-y-5 max-h-[92vh] overflow-y-auto shadow-2xl"
+      className="w-full sm:max-w-3xl bg-canvas border border-line-strong rounded-t-3xl sm:rounded-3xl p-5 sm:p-7 space-y-5 max-h-[92vh] overflow-y-auto shadow-2xl"
     >
       <div className="flex items-center justify-between pb-4 border-b border-line">
         <div className="flex items-center gap-3">

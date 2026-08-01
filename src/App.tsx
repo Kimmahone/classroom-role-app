@@ -661,7 +661,7 @@ export function App() {
   const completedRatio = students.length > 0 ? Math.round((completedCount / students.length) * 100) : 0;
 
   return (
-    <div className="min-h-screen bg-base text-ink flex flex-col font-sans">
+    <div className="min-h-screen bg-canvas text-ink flex flex-col font-sans">
 
       {currentMode !== 'tv' && (
         <Header
@@ -669,6 +669,7 @@ export function App() {
           onModeChange={setCurrentMode}
           prefs={prefs}
           onOpenTweaks={() => setShowTweaks(true)}
+          onToggleSound={() => updatePrefs({ sound: !prefs.sound })}
           classrooms={classrooms}
           activeClassId={activeClassId}
           onSwitchClass={handleSwitchClass}

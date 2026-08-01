@@ -17,6 +17,7 @@ interface HeaderProps {
   onModeChange: (mode: ViewMode) => void;
   prefs: AppPrefs;
   onOpenTweaks: () => void;
+  onToggleSound: () => void;
   classrooms: Classroom[];
   activeClassId: string;
   onSwitchClass: (classId: string) => void;
@@ -74,6 +75,7 @@ export const Header: React.FC<HeaderProps> = ({
   onModeChange,
   prefs,
   onOpenTweaks,
+  onToggleSound,
   classrooms,
   activeClassId,
   onSwitchClass,
@@ -131,7 +133,8 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center justify-between h-[72px] gap-3">
 
           {/* ── 학급 선택기 ─────────────────────────────────────── */}
-          <div className="flex items-center gap-2 min-w-0" ref={classMenuRef}>
+          {/* flex-1 min-w-0 : 공간이 모자라면 내비게이션이 아니라 이쪽이 먼저 줄어든다 */}
+          <div className="flex items-center gap-2 min-w-0 flex-1" ref={classMenuRef}>
             <div className="relative min-w-0">
               <button
                 onClick={() => {
@@ -208,46 +211,48 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </div>
 
-            {/* 동기화 상태 (데스크톱) */}
+            {/* 동기화 상태 — 좁은 화면에서는 아이콘만 남겨 내비게이션 자리를 뺏지 않는다 */}
             <button
               onClick={onOpenFirebaseModal}
-              className={`hidden lg:inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1.5 rounded-full border transition ${sync.className}`}
-              title={syncError || '클라우드 동기화 설정'}
+              className={`hidden lg:inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold px-2 2xl:px-2.5 py-1.5 rounded-full border whitespace-nowrap transition ${sync.className}`}
+              title={syncError || `${sync.label} — 눌러서 클라우드 설정 열기`}
+              aria-label={sync.label}
             >
-              <SyncIcon className={`w-3 h-3 ${syncState === 'saving' ? 'animate-pulse' : ''}`} />
-              <span className="truncate max-w-[150px]">{sync.label}</span>
+              <SyncIcon className={`w-3.5 h-3.5 shrink-0 ${syncState === 'saving' ? 'animate-pulse' : ''}`} />
+              <span className="hidden 2xl:inline truncate max-w-[150px]">{sync.label}</span>
             </button>
           </div>
 
           {/* ── 데스크톱 내비게이션 ──────────────────────────────── */}
-          <nav className="hidden md:flex items-center gap-1 p-1.5 rounded-2xl bg-elevated border border-line">
+          {/* shrink-0 + whitespace-nowrap : 메뉴 이름이 절대 두 줄로 접히지 않게 한다 */}
+          <nav className="hidden md:flex shrink-0 items-center gap-1 p-1.5 rounded-2xl bg-elevated border border-line">
             {NAV_ITEMS.map(({ mode, label, Icon }) => (
               <button
                 key={mode}
                 onClick={() => handleNavigate(mode)}
                 aria-current={currentMode === mode ? 'page' : undefined}
-                className={`flex items-center gap-2 px-3.5 py-2 text-sm font-semibold rounded-xl transition ${
+                className={`flex shrink-0 items-center gap-1.5 px-2.5 lg:px-3.5 py-2 text-sm font-semibold rounded-xl whitespace-nowrap transition ${
                   currentMode === mode
                     ? 'bg-accent text-white shadow-md shadow-accent/30'
                     : 'text-muted hover:text-ink hover:bg-hover'
                 }`}
               >
-                <Icon className="w-4 h-4" />
+                <Icon className="w-4 h-4 shrink-0" />
                 {label}
               </button>
             ))}
           </nav>
 
           {/* ── 도구 ────────────────────────────────────────────── */}
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
 
-            <span className="hidden xl:inline px-2.5 py-1 text-xs font-bold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+            <span className="hidden 2xl:inline shrink-0 px-2.5 py-1 text-xs font-bold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 whitespace-nowrap">
               {completedRatio}% 완수
             </span>
 
             {/* Google 로그인 */}
             {userProfile ? (
-              <div className="hidden sm:flex items-center gap-2 p-1.5 rounded-2xl bg-elevated border border-line-strong">
+              <div className="hidden sm:flex shrink-0 items-center gap-2 p-1.5 rounded-2xl bg-elevated border border-line-strong">
                 {userProfile.photoURL ? (
                   <img src={userProfile.photoURL} alt="" className="w-7 h-7 rounded-full border border-accent-soft" />
                 ) : (
@@ -255,7 +260,7 @@ export const Header: React.FC<HeaderProps> = ({
                     {userProfile.displayName ? userProfile.displayName[0] : 'G'}
                   </div>
                 )}
-                <span className="text-xs font-bold text-ink hidden lg:inline max-w-[90px] truncate">
+                <span className="text-xs font-bold text-ink hidden 2xl:inline max-w-[90px] truncate">
                   {userProfile.displayName || '선생님'}
                 </span>
                 <button
@@ -270,11 +275,11 @@ export const Header: React.FC<HeaderProps> = ({
             ) : (
               <button
                 onClick={onLoginGoogle}
-                className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-elevated hover:bg-hover text-ink font-bold text-xs border border-line-strong transition"
+                className="hidden sm:flex shrink-0 items-center gap-1.5 px-3 py-2 rounded-xl bg-elevated hover:bg-hover text-ink font-bold text-xs border border-line-strong whitespace-nowrap transition"
                 title="Google 계정으로 로그인"
               >
                 <LogIn className="w-3.5 h-3.5 text-accent-text" />
-                <span className="hidden lg:inline">구글 로그인</span>
+                <span className="hidden 2xl:inline">구글 로그인</span>
               </button>
             )}
 
@@ -286,7 +291,7 @@ export const Header: React.FC<HeaderProps> = ({
               }}
               title="화면 & 사용 환경 설정 (라이트/다크 모드)"
               aria-label="화면 설정 열기"
-              className="relative p-2.5 rounded-xl bg-elevated text-muted hover:bg-hover hover:text-ink border border-line-strong transition"
+              className="relative shrink-0 p-2.5 rounded-xl bg-elevated text-muted hover:bg-hover hover:text-ink border border-line-strong transition"
             >
               <SlidersHorizontal className="w-5 h-5" />
               <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-accent text-white flex items-center justify-center">
@@ -294,21 +299,33 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             </button>
 
-            {/* 효과음 상태 표시 */}
-            <span
-              className="hidden lg:flex items-center p-2.5 rounded-xl bg-elevated border border-line-strong text-muted"
-              title={prefs.sound ? '효과음 켜짐 (화면 설정에서 변경)' : '효과음 꺼짐 (화면 설정에서 변경)'}
+            {/* 효과음 켜기/끄기 */}
+            <button
+              onClick={() => {
+                // 켜는 순간에는 소리로 확인시켜 준다(끌 때는 당연히 소리가 나면 안 된다).
+                const next = !prefs.sound;
+                soundFx.enabled = next;
+                if (next) soundFx.playSuccess();
+                onToggleSound();
+              }}
+              role="switch"
+              aria-checked={prefs.sound}
+              aria-label={prefs.sound ? '효과음 끄기' : '효과음 켜기'}
+              title={prefs.sound ? '효과음 켜짐 — 눌러서 끄기' : '효과음 꺼짐 — 눌러서 켜기'}
+              className="hidden sm:flex shrink-0 items-center p-2.5 rounded-xl bg-elevated hover:bg-hover border border-line-strong text-muted transition"
             >
               {prefs.sound ? <Volume2 className="w-5 h-5 text-accent-text" /> : <VolumeX className="w-5 h-5 text-faint" />}
-            </span>
+            </button>
 
             {/* TV 모드 */}
             <button
               onClick={() => handleNavigate('tv')}
-              className="hidden md:flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-bold text-sm shadow-lg shadow-emerald-600/25 transition"
+              title="교실 TV 모드로 크게 보기"
+              aria-label="교실 TV 모드"
+              className="hidden md:flex shrink-0 items-center gap-2 px-3 lg:px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-bold text-sm shadow-lg shadow-emerald-600/25 whitespace-nowrap transition"
             >
-              <Monitor className="w-4 h-4" />
-              <span className="hidden lg:inline">교실 TV 모드</span>
+              <Monitor className="w-4 h-4 shrink-0" />
+              <span className="hidden xl:inline">교실 TV 모드</span>
             </button>
 
             {/* 모바일 메뉴 */}

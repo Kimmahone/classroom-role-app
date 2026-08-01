@@ -103,7 +103,7 @@ export const TvModeView: React.FC<TvModeViewProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-base text-ink overflow-y-auto p-4 sm:p-8 flex flex-col">
+    <div className="fixed inset-0 z-50 bg-canvas text-ink overflow-y-auto p-4 sm:p-8 flex flex-col">
 
       {/* ── 상단 배너 ─────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-4 pb-5 mb-5 border-b border-line">
