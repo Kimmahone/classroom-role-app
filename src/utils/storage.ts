@@ -1,6 +1,6 @@
 import {
   Student, Role, Assignment, DailyStatusHistory, RoleHistoryRecord, RolePreset, FirebaseConfig,
-  ActivityCategory, ActivityCategoryConfig, DEFAULT_ACTIVITY_CATEGORIES
+  ActivityCategory, ActivityCategoryConfig, DEFAULT_ACTIVITY_CATEGORIES, Classroom
 } from '../types';
 
 export const STORAGE_KEYS = {
@@ -13,6 +13,32 @@ export const STORAGE_KEYS = {
   FIREBASE_CONFIG: 'classroom_role_firebase_config',
   ACTIVE_CATEGORY: 'classroom_role_active_category',
   CATEGORIES: 'classroom_role_categories',
+  CLASSES: 'classroom_role_classes',
+  ACTIVE_CLASS: 'classroom_role_active_class',
+};
+
+/**
+ * v5: 학생·역할·배정·기록이 모두 학급(Classroom) 단위로 분리됐다.
+ * 학급별 데이터는 `<기본키>::<학급id>` 형태로 저장한다.
+ * (커스텀 템플릿과 Firebase 접속 정보는 교사 단위이므로 분리하지 않는다.)
+ */
+const scoped = (base: string, classId: string): string => `${base}::${classId}`;
+
+const readJson = <T,>(key: string, fallback: T): T => {
+  try {
+    const data = localStorage.getItem(key);
+    return data ? (JSON.parse(data) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const writeJson = (key: string, value: unknown): void => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    console.warn('localStorage 저장 실패:', e);
+  }
 };
 
 /**
@@ -252,80 +278,47 @@ export const DEFAULT_ROLES: Role[] = BUILTIN_ROLE_PRESETS[0].roles.map((r, idx) 
   id: `r_${idx + 1}`
 }));
 
-// LocalStorage Loaders & Savers
-export const loadStudents = (): Student[] => {
-  try {
-    const data = localStorage.getItem(STORAGE_KEYS.STUDENTS);
-    return data ? JSON.parse(data) : DEFAULT_STUDENTS;
-  } catch {
-    return DEFAULT_STUDENTS;
-  }
+// ── 학급 단위 로더 / 세이버 ──────────────────────────────────────────
+export const loadStudents = (classId: string): Student[] =>
+  readJson<Student[]>(scoped(STORAGE_KEYS.STUDENTS, classId), DEFAULT_STUDENTS);
+
+export const saveStudents = (classId: string, students: Student[]): void =>
+  writeJson(scoped(STORAGE_KEYS.STUDENTS, classId), students);
+
+export const loadRoles = (classId: string): Role[] =>
+  readJson<Role[]>(scoped(STORAGE_KEYS.ROLES, classId), DEFAULT_ROLES);
+
+export const saveRoles = (classId: string, roles: Role[]): void =>
+  writeJson(scoped(STORAGE_KEYS.ROLES, classId), roles);
+
+export const loadAssignments = (classId: string): Assignment[] => {
+  const stored = readJson<Assignment[] | null>(scoped(STORAGE_KEYS.ASSIGNMENTS, classId), null);
+  if (stored) return stored;
+
+  // 최초 진입 시에는 기본 명단/역할을 순서대로 이어 붙인 임시 배정을 보여준다.
+  const students = loadStudents(classId);
+  const roles = loadRoles(classId);
+  if (roles.length === 0) return [];
+
+  return students.map((st, idx) => {
+    const role = roles[idx % roles.length];
+    return { studentId: st.id, roleId: role.id, activityCategory: role.activityCategory || 'daily' };
+  });
 };
 
-export const saveStudents = (students: Student[]): void => {
-  localStorage.setItem(STORAGE_KEYS.STUDENTS, JSON.stringify(students));
-};
+export const saveAssignments = (classId: string, assignments: Assignment[]): void =>
+  writeJson(scoped(STORAGE_KEYS.ASSIGNMENTS, classId), assignments);
 
-export const loadRoles = (): Role[] => {
-  try {
-    const data = localStorage.getItem(STORAGE_KEYS.ROLES);
-    return data ? JSON.parse(data) : DEFAULT_ROLES;
-  } catch {
-    return DEFAULT_ROLES;
-  }
-};
+export const loadDailyStatus = (classId: string): DailyStatusHistory =>
+  readJson<DailyStatusHistory>(scoped(STORAGE_KEYS.DAILY_STATUS, classId), {});
 
-export const saveRoles = (roles: Role[]): void => {
-  localStorage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(roles));
-};
+export const saveDailyStatus = (classId: string, dailyStatus: DailyStatusHistory): void =>
+  writeJson(scoped(STORAGE_KEYS.DAILY_STATUS, classId), dailyStatus);
 
-export const loadAssignments = (): Assignment[] => {
-  try {
-    const data = localStorage.getItem(STORAGE_KEYS.ASSIGNMENTS);
-    if (data) return JSON.parse(data);
-
-    const students = loadStudents();
-    const roles = loadRoles();
-    const initial: Assignment[] = [];
-
-    let roleIdx = 0;
-    students.forEach((st) => {
-      if (roles.length > 0) {
-        const role = roles[roleIdx % roles.length];
-        initial.push({ studentId: st.id, roleId: role.id, activityCategory: role.activityCategory || 'daily' });
-        roleIdx++;
-      }
-    });
-    return initial;
-  } catch {
-    return [];
-  }
-};
-
-export const saveAssignments = (assignments: Assignment[]): void => {
-  localStorage.setItem(STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(assignments));
-};
-
-export const loadDailyStatus = (): DailyStatusHistory => {
-  try {
-    const data = localStorage.getItem(STORAGE_KEYS.DAILY_STATUS);
-    return data ? JSON.parse(data) : {};
-  } catch {
-    return {};
-  }
-};
-
-export const saveDailyStatus = (dailyStatus: DailyStatusHistory): void => {
-  localStorage.setItem(STORAGE_KEYS.DAILY_STATUS, JSON.stringify(dailyStatus));
-};
-
+/** 커스텀 템플릿은 학급이 아니라 교사 단위로 공유된다. */
 export const loadCustomPresets = (): RolePreset[] => {
-  try {
-    const data = localStorage.getItem(STORAGE_KEYS.CUSTOM_PRESETS);
-    return data ? JSON.parse(data) : [];
-  } catch {
-    return [];
-  }
+  const parsed = readJson<RolePreset[]>(STORAGE_KEYS.CUSTOM_PRESETS, []);
+  return Array.isArray(parsed) ? parsed : [];
 };
 
 export const saveCustomPresets = (presets: RolePreset[]): void => {
@@ -366,19 +359,13 @@ export const saveFirebaseConfig = (config: FirebaseConfig): FirebaseConfig => {
 export const historyRecordKey = (r: Pick<RoleHistoryRecord, 'date' | 'activityCategory' | 'studentId'>): string =>
   `${r.date}|${r.activityCategory}|${r.studentId}`;
 
-export const loadRoleHistory = (): RoleHistoryRecord[] => {
-  try {
-    const data = localStorage.getItem(STORAGE_KEYS.HISTORY);
-    const parsed = data ? JSON.parse(data) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+export const loadRoleHistory = (classId: string): RoleHistoryRecord[] => {
+  const parsed = readJson<RoleHistoryRecord[]>(scoped(STORAGE_KEYS.HISTORY, classId), []);
+  return Array.isArray(parsed) ? parsed : [];
 };
 
-export const saveRoleHistory = (history: RoleHistoryRecord[]): void => {
-  localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(history));
-};
+export const saveRoleHistory = (classId: string, history: RoleHistoryRecord[]): void =>
+  writeJson(scoped(STORAGE_KEYS.HISTORY, classId), history);
 
 /** 기존 이력에 새 기록을 upsert 한 배열을 반환한다. */
 export const mergeRoleHistory = (
@@ -414,32 +401,178 @@ export const normalizeCategories = (list: unknown): ActivityCategoryConfig[] => 
   return valid.length > 0 ? valid : DEFAULT_ACTIVITY_CATEGORIES;
 };
 
-export const loadCategories = (): ActivityCategoryConfig[] => {
+export const loadCategories = (classId: string): ActivityCategoryConfig[] => {
+  const raw = localStorage.getItem(scoped(STORAGE_KEYS.CATEGORIES, classId));
+  if (!raw) return DEFAULT_ACTIVITY_CATEGORIES;
   try {
-    const data = localStorage.getItem(STORAGE_KEYS.CATEGORIES);
-    if (!data) return DEFAULT_ACTIVITY_CATEGORIES;
-    return normalizeCategories(JSON.parse(data));
+    return normalizeCategories(JSON.parse(raw));
   } catch {
     return DEFAULT_ACTIVITY_CATEGORIES;
   }
 };
 
-export const saveCategories = (categories: ActivityCategoryConfig[]): void => {
-  localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(categories));
-};
+export const saveCategories = (classId: string, categories: ActivityCategoryConfig[]): void =>
+  writeJson(scoped(STORAGE_KEYS.CATEGORIES, classId), categories);
 
-export const loadActiveCategory = (): ActivityCategory => {
+export const loadActiveCategory = (classId: string): ActivityCategory => {
   try {
-    const cat = localStorage.getItem(STORAGE_KEYS.ACTIVE_CATEGORY);
-    return (cat as ActivityCategory) || 'daily';
+    return (localStorage.getItem(scoped(STORAGE_KEYS.ACTIVE_CATEGORY, classId)) as ActivityCategory) || 'daily';
   } catch {
     return 'daily';
   }
 };
 
-export const saveActiveCategory = (category: ActivityCategory): void => {
-  localStorage.setItem(STORAGE_KEYS.ACTIVE_CATEGORY, category);
+export const saveActiveCategory = (classId: string, category: ActivityCategory): void => {
+  try {
+    localStorage.setItem(scoped(STORAGE_KEYS.ACTIVE_CATEGORY, classId), category);
+  } catch {
+    /* noop */
+  }
 };
+
+// ══════════════════════════════════════════════════════════════════════
+//  학급(Classroom) 목록 관리
+// ══════════════════════════════════════════════════════════════════════
+
+export const CLASSROOM_EMOJIS = ['🏫', '📚', '🎨', '🔬', '⚽️', '🎵', '🌱', '🚀', '🧩', '🐣', '🍀', '⭐️'];
+
+export const makeClassroomId = (): string =>
+  `cls_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+
+const isValidClassroom = (v: unknown): v is Classroom =>
+  typeof v === 'object' && v !== null &&
+  typeof (v as Classroom).id === 'string' && (v as Classroom).id.length > 0 &&
+  typeof (v as Classroom).name === 'string';
+
+export const normalizeClassrooms = (list: unknown): Classroom[] => {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set<string>();
+  return list.filter(isValidClassroom).reduce<Classroom[]>((acc, c) => {
+    if (seen.has(c.id)) return acc;
+    seen.add(c.id);
+    acc.push({
+      id: c.id,
+      name: c.name || '이름 없는 학급',
+      term: c.term || '',
+      emoji: c.emoji || '🏫',
+      color: c.color || 'indigo',
+      createdAt: c.createdAt || new Date().toISOString(),
+    });
+    return acc;
+  }, []);
+};
+
+export const saveClassrooms = (classrooms: Classroom[]): void =>
+  writeJson(STORAGE_KEYS.CLASSES, classrooms);
+
+/**
+ * 학급 목록을 읽는다. 목록이 없으면 v4 이하의 단일 학급 데이터를
+ * "기본 학급" 하나로 옮겨 담는 마이그레이션을 수행한다.
+ *
+ * 기본 학급 id 는 기존 firebaseConfig.classroomId 를 그대로 쓴다.
+ * 그래야 이미 클라우드에 올라가 있는 users/{uid}/classrooms/{id} 문서를 계속 사용할 수 있다.
+ */
+export const loadClassrooms = (): Classroom[] => {
+  const existing = normalizeClassrooms(readJson<unknown>(STORAGE_KEYS.CLASSES, null));
+  if (existing.length > 0) return existing;
+
+  const legacyId = loadFirebaseConfig().classroomId || 'my_classroom_1';
+  const migrated: Classroom = {
+    id: legacyId,
+    name: '우리 반',
+    term: '',
+    emoji: '🏫',
+    color: 'indigo',
+    createdAt: new Date().toISOString(),
+  };
+
+  // 기존 전역 키에 있던 데이터를 학급 네임스페이스로 복사한다(원본은 되돌리기용으로 남겨둔다).
+  const legacyKeys = [
+    STORAGE_KEYS.STUDENTS,
+    STORAGE_KEYS.ROLES,
+    STORAGE_KEYS.ASSIGNMENTS,
+    STORAGE_KEYS.DAILY_STATUS,
+    STORAGE_KEYS.HISTORY,
+    STORAGE_KEYS.CATEGORIES,
+    STORAGE_KEYS.ACTIVE_CATEGORY,
+  ];
+  try {
+    legacyKeys.forEach((base) => {
+      const value = localStorage.getItem(base);
+      const target = scoped(base, legacyId);
+      if (value !== null && localStorage.getItem(target) === null) {
+        localStorage.setItem(target, value);
+      }
+    });
+  } catch (e) {
+    console.warn('학급 마이그레이션 중 일부 데이터를 옮기지 못했습니다:', e);
+  }
+
+  saveClassrooms([migrated]);
+  return [migrated];
+};
+
+export const loadActiveClassId = (classrooms: Classroom[]): string => {
+  let stored: string | null = null;
+  try {
+    stored = localStorage.getItem(STORAGE_KEYS.ACTIVE_CLASS);
+  } catch {
+    stored = null;
+  }
+  if (stored && classrooms.some((c) => c.id === stored)) return stored;
+  return classrooms[0]?.id ?? '';
+};
+
+export const saveActiveClassId = (classId: string): void => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_CLASS, classId);
+  } catch {
+    /* noop */
+  }
+};
+
+/** 학급 하나에 속한 로컬 데이터를 모두 지운다. */
+export const purgeClassroomData = (classId: string): void => {
+  const bases = [
+    STORAGE_KEYS.STUDENTS,
+    STORAGE_KEYS.ROLES,
+    STORAGE_KEYS.ASSIGNMENTS,
+    STORAGE_KEYS.DAILY_STATUS,
+    STORAGE_KEYS.HISTORY,
+    STORAGE_KEYS.CATEGORIES,
+    STORAGE_KEYS.ACTIVE_CATEGORY,
+  ];
+  try {
+    bases.forEach((base) => localStorage.removeItem(scoped(base, classId)));
+  } catch {
+    /* noop */
+  }
+};
+
+/** 새 학급의 초기 데이터를 만든다. copyFromClassId 를 주면 범주/역할 구성을 복사한다. */
+export const seedClassroomData = (classId: string, copyFromClassId?: string): void => {
+  if (copyFromClassId) {
+    const categories = loadCategories(copyFromClassId);
+    const roles = loadRoles(copyFromClassId);
+    saveCategories(classId, categories);
+    saveRoles(classId, roles);
+  } else {
+    saveCategories(classId, DEFAULT_ACTIVITY_CATEGORIES);
+    saveRoles(classId, []);
+  }
+  // 학생 명단과 기록은 절대 복사하지 않는다(다른 반 학생이 섞이면 안 된다).
+  saveStudents(classId, []);
+  saveAssignments(classId, []);
+  saveDailyStatus(classId, {});
+  saveRoleHistory(classId, []);
+};
+
+/** 학급 카드에 표시할 요약 수치 */
+export const classroomSummary = (classId: string) => ({
+  studentCount: loadStudents(classId).length,
+  roleCount: loadRoles(classId).length,
+  categoryCount: loadCategories(classId).length,
+});
 
 export const getTodayKey = (dateObj: Date = new Date()): string => {
   const year = dateObj.getFullYear();
@@ -459,17 +592,18 @@ export const formatKoreanDate = (dateStr: string): string => {
 // Export entire database payload to JSON
 // firebaseConfig 는 접속 키를 포함하고, 복원 시 앱이 제3자 프로젝트를 바라보게 만들 수 있어
 // 백업 대상에서 제외한다. (클라우드 설정은 설정 화면에서 직접 입력)
-export const exportDataToJson = (): string => {
+export const exportDataToJson = (classId: string, classroom?: Classroom): string => {
   const exportPayload = {
-    version: '4.0',
+    version: '5.0',
     exportDate: new Date().toISOString(),
-    students: loadStudents(),
-    roles: loadRoles(),
-    assignments: loadAssignments(),
-    dailyStatus: loadDailyStatus(),
+    classroom: classroom ? { ...classroom } : undefined,
+    students: loadStudents(classId),
+    roles: loadRoles(classId),
+    assignments: loadAssignments(classId),
+    dailyStatus: loadDailyStatus(classId),
     customPresets: loadCustomPresets(),
-    roleHistory: loadRoleHistory(),
-    categories: loadCategories(),
+    roleHistory: loadRoleHistory(classId),
+    categories: loadCategories(classId),
   };
   return JSON.stringify(exportPayload, null, 2);
 };
@@ -505,8 +639,8 @@ export interface ImportResult {
   imported: string[];
 }
 
-// Import database payload from JSON
-export const importDataFromJson = (jsonStr: string): ImportResult => {
+// Import database payload from JSON — 지정한 학급에 덮어쓴다.
+export const importDataFromJson = (jsonStr: string, classId: string): ImportResult => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(jsonStr);
@@ -532,13 +666,13 @@ export const importDataFromJson = (jsonStr: string): ImportResult => {
     }
   };
 
-  apply('categories', '활동 범주', validCategories, (v) => saveCategories(normalizeCategories(v)));
-  apply('students', '학생 명단', validStudents, saveStudents);
-  apply('roles', '역할 목록', validRoles, saveRoles);
-  apply('assignments', '역할 배정', validAssignments, saveAssignments);
-  apply('dailyStatus', '일일 체크 기록', validDailyStatus, saveDailyStatus);
+  apply('categories', '활동 범주', validCategories, (v) => saveCategories(classId, normalizeCategories(v)));
+  apply('students', '학생 명단', validStudents, (v) => saveStudents(classId, v));
+  apply('roles', '역할 목록', validRoles, (v) => saveRoles(classId, v));
+  apply('assignments', '역할 배정', validAssignments, (v) => saveAssignments(classId, v));
+  apply('dailyStatus', '일일 체크 기록', validDailyStatus, (v) => saveDailyStatus(classId, v));
   apply('customPresets', '커스텀 템플릿', validPresets, saveCustomPresets);
-  apply('roleHistory', '역할 배정 이력', validHistory, saveRoleHistory);
+  apply('roleHistory', '역할 배정 이력', validHistory, (v) => saveRoleHistory(classId, v));
 
   if (imported.length === 0) {
     return {

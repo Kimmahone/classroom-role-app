@@ -1,9 +1,14 @@
-import React from 'react';
-import { Student, Role, Assignment, DailyCheck, ActivityCategoryConfig } from '../types';
+import React, { useMemo, useState } from 'react';
+import { Student, Role, Assignment, DailyCheck, ActivityCategoryConfig, Classroom, paletteOf } from '../types';
 import { RoleIcon } from './RoleIcon';
+import { ProgressRing } from './ProgressRing';
+import { avatarStyle, initialsOf } from '../utils/visual';
+import { AppPrefs, vibrate } from '../utils/prefs';
 import { soundFx } from '../utils/sound';
 import confetti from 'canvas-confetti';
-import { CheckCircle2, ArrowLeft, Maximize2, Minimize2, Trophy } from 'lucide-react';
+import {
+  ArrowLeft, Maximize2, Minimize2, Trophy, Check, ZoomIn, ZoomOut, Users
+} from 'lucide-react';
 
 interface TvModeViewProps {
   students: Student[];
@@ -11,9 +16,23 @@ interface TvModeViewProps {
   assignments: Assignment[];
   dailyStatus: DailyCheck;
   categoryConfig: ActivityCategoryConfig;
+  classroom?: Classroom;
+  prefs: AppPrefs;
   onToggleStatus: (studentId: string) => void;
   onExitTvMode: () => void;
 }
+
+/** 화면에 몇 칸씩 보여줄지 — 학생 수가 많은 학급을 위해 교사가 직접 조절한다. */
+const COLUMN_STEPS = [3, 4, 5, 6, 7, 8];
+
+const COLUMN_CLASS: Record<number, string> = {
+  3: 'grid-cols-2 md:grid-cols-3',
+  4: 'grid-cols-2 md:grid-cols-4',
+  5: 'grid-cols-3 md:grid-cols-5',
+  6: 'grid-cols-3 md:grid-cols-6',
+  7: 'grid-cols-4 md:grid-cols-7',
+  8: 'grid-cols-4 md:grid-cols-8',
+};
 
 export const TvModeView: React.FC<TvModeViewProps> = ({
   students,
@@ -21,157 +40,233 @@ export const TvModeView: React.FC<TvModeViewProps> = ({
   assignments,
   dailyStatus,
   categoryConfig,
+  classroom,
+  prefs,
   onToggleStatus,
   onExitTvMode,
 }) => {
-  const [isFullscreen, setIsFullscreen] = React.useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [columnIdx, setColumnIdx] = useState(2); // 기본 5칸
+  const [tapKey, setTapKey] = useState<Record<string, number>>({});
+
+  const palette = paletteOf(categoryConfig.color);
+  const columns = COLUMN_STEPS[columnIdx];
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(() => {});
       setIsFullscreen(true);
     } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen().catch(() => {});
-        setIsFullscreen(false);
-      }
+      document.exitFullscreen?.().catch(() => {});
+      setIsFullscreen(false);
     }
   };
 
-  const roleMap = new Map<string, Role>();
-  roles.forEach((r) => roleMap.set(r.id, r));
+  const roleMap = useMemo(() => new Map(roles.map((r) => [r.id, r])), [roles]);
+  const assignMap = useMemo(() => new Map(assignments.map((a) => [a.studentId, a])), [assignments]);
 
   const totalCount = students.length;
   const completedCount = students.filter((s) => dailyStatus[s.id]).length;
   const ratio = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+  const pendingCount = totalCount - completedCount;
 
-  const handleToggle = (studentId: string, isDone: boolean) => {
+  const handleToggle = (e: React.MouseEvent, studentId: string, isDone: boolean) => {
+    setTapKey((prev) => ({ ...prev, [studentId]: Date.now() }));
+
     if (!isDone) {
       soundFx.playSuccess();
+      if (prefs.haptics) vibrate(20);
+      if (prefs.confetti && prefs.animations) {
+        const rect = e.currentTarget.getBoundingClientRect();
+        confetti({
+          particleCount: 26,
+          spread: 55,
+          startVelocity: 26,
+          scalar: 0.9,
+          origin: {
+            x: (rect.left + rect.width / 2) / window.innerWidth,
+            y: (rect.top + rect.height / 2) / window.innerHeight,
+          },
+        });
+      }
       if (completedCount + 1 === totalCount && totalCount > 0) {
         soundFx.playFanfare();
-        confetti({
-          particleCount: 150,
-          spread: 100,
-          origin: { y: 0.5 }
-        });
+        if (prefs.confetti && prefs.animations) {
+          confetti({ particleCount: 180, spread: 110, origin: { y: 0.5 } });
+        }
       }
     } else {
       soundFx.playClick();
+      if (prefs.haptics) vibrate(10);
     }
     onToggleStatus(studentId);
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950 text-white overflow-y-auto p-6 sm:p-10 flex flex-col justify-between">
-      
-      {/* Top Banner */}
-      <div>
-        <div className="flex items-center justify-between mb-8 pb-6 border-b border-slate-800">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={onExitTvMode}
-              className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-base border border-slate-700 transition"
-            >
-              <ArrowLeft className="w-5 h-5" />
-              <span>일반 모드로 돌아가기</span>
-            </button>
-            <div>
-              <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-indigo-300">
-                📺 교실 TV 역할 현황판
-              </h1>
-              <span className="inline-flex items-center gap-2 mt-1 text-base font-bold text-slate-400">
-                <RoleIcon name={categoryConfig.icon} className="w-4 h-4" />
-                {categoryConfig.name}
-              </span>
-            </div>
-          </div>
+    <div className="fixed inset-0 z-50 bg-base text-ink overflow-y-auto p-4 sm:p-8 flex flex-col">
 
-          <div className="flex items-center gap-4">
-            <button
-              onClick={toggleFullscreen}
-              className="p-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
-              title="전체 화면 토글"
-            >
-              {isFullscreen ? <Minimize2 className="w-6 h-6" /> : <Maximize2 className="w-6 h-6" />}
-            </button>
+      {/* ── 상단 배너 ─────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-4 pb-5 mb-5 border-b border-line">
+        <button
+          onClick={onExitTvMode}
+          className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-elevated hover:bg-hover text-ink font-bold text-sm border border-line-strong transition"
+        >
+          <ArrowLeft className="w-5 h-5" />
+          <span className="hidden sm:inline">일반 모드</span>
+        </button>
+
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-muted">
+            {classroom && <span>{classroom.emoji} {classroom.name}</span>}
+            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg border ${palette.badge}`}>
+              <RoleIcon name={categoryConfig.icon} className="w-3.5 h-3.5" />
+              {categoryConfig.name}
+            </span>
           </div>
+          <h1 className="text-2xl sm:text-4xl font-black tracking-tight text-ink mt-1">
+            📺 오늘의 역할 현황판
+          </h1>
         </div>
 
-        {/* Big Progress Thermometer */}
-        <div className="mb-10 p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <Trophy className="w-8 h-8 text-amber-400" />
-              <span className="text-2xl font-black text-white">오늘 우리 반 역할 완수율</span>
+        {/* 링 게이지 + 큰 수치 */}
+        <div className="ml-auto flex items-center gap-4 sm:gap-6">
+          <div className="text-right hidden sm:block">
+            <div className="text-3xl sm:text-5xl font-black tabular-nums">
+              <span className={ratio === 100 ? 'text-amber-400' : 'text-emerald-400'}>{completedCount}</span>
+              <span className="text-muted"> / {totalCount}</span>
             </div>
-            <div className="text-3xl font-black">
-              <span className="text-emerald-400">{completedCount}</span> / {totalCount}명 ({ratio}%)
+            <div className="text-sm font-bold text-muted">
+              {pendingCount > 0 ? `아직 ${pendingCount}명 남았어요` : '모두 완수했습니다!'}
             </div>
           </div>
-          <div className="w-full h-8 rounded-full bg-slate-800 overflow-hidden border border-slate-700 p-1">
-            <div
-              className={`h-full rounded-full transition-all duration-700 ${
-                ratio === 100 ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-indigo-500' : 'bg-emerald-500'
-              }`}
-              style={{ width: `${ratio}%` }}
-            ></div>
-          </div>
-        </div>
 
-        {/* Large Cards Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+          <ProgressRing value={ratio} size={104} stroke={11} celebrate={ratio === 100 && totalCount > 0}>
+            <span className={`text-2xl font-black tabular-nums ${ratio === 100 ? 'text-amber-300' : 'text-ink'}`}>
+              {ratio}%
+            </span>
+          </ProgressRing>
+
+          <div className="flex flex-col gap-1.5">
+            <button
+              onClick={() => setColumnIdx((i) => Math.max(0, i - 1))}
+              disabled={columnIdx === 0}
+              title="카드 크게 보기"
+              aria-label="카드 크게 보기"
+              className="p-2.5 rounded-xl bg-elevated hover:bg-hover text-muted border border-line-strong disabled:opacity-30 transition"
+            >
+              <ZoomIn className="w-5 h-5" />
+            </button>
+            <button
+              onClick={() => setColumnIdx((i) => Math.min(COLUMN_STEPS.length - 1, i + 1))}
+              disabled={columnIdx === COLUMN_STEPS.length - 1}
+              title="카드 작게 보기 (많은 인원 표시)"
+              aria-label="카드 작게 보기"
+              className="p-2.5 rounded-xl bg-elevated hover:bg-hover text-muted border border-line-strong disabled:opacity-30 transition"
+            >
+              <ZoomOut className="w-5 h-5" />
+            </button>
+          </div>
+
+          <button
+            onClick={toggleFullscreen}
+            className="p-3 rounded-2xl bg-elevated hover:bg-hover text-muted border border-line-strong transition"
+            title="전체 화면 토글"
+            aria-label="전체 화면 토글"
+          >
+            {isFullscreen ? <Minimize2 className="w-6 h-6" /> : <Maximize2 className="w-6 h-6" />}
+          </button>
+        </div>
+      </div>
+
+      {/* 100% 달성 배너 */}
+      {ratio === 100 && totalCount > 0 && (
+        <div className="mb-5 py-4 px-6 rounded-3xl bg-gradient-to-r from-amber-500/20 via-emerald-500/20 to-accent-soft/20 border border-amber-500/40 flex items-center justify-center gap-3 animate-pop">
+          <Trophy className="w-8 h-8 text-amber-400" />
+          <span className="text-xl sm:text-3xl font-black text-ink text-center">
+            우리 반 모두가 오늘의 역할을 마쳤습니다! 🎉
+          </span>
+        </div>
+      )}
+
+      {/* ── 학생 타일 ─────────────────────────────────────────── */}
+      {totalCount === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
+          <Users className="w-12 h-12 text-faint" />
+          <p className="text-lg font-bold text-muted">등록된 학생이 없습니다.</p>
+          <p className="text-sm text-faint">[교사 설정 → 학생 명단]에서 학생을 추가해 주세요.</p>
+        </div>
+      ) : (
+        <div className={`grid ${COLUMN_CLASS[columns]} gap-3 sm:gap-4`}>
           {students.map((student) => {
-            const assign = assignments.find((a) => a.studentId === student.id);
+            const assign = assignMap.get(student.id);
             const role = assign ? roleMap.get(assign.roleId) || null : null;
             const isDone = !!dailyStatus[student.id];
 
             return (
-              <div
+              <button
                 key={student.id}
-                onClick={() => handleToggle(student.id, isDone)}
-                className={`p-6 rounded-3xl border-2 cursor-pointer transition-all duration-300 select-none flex flex-col justify-between ${
+                onClick={(e) => handleToggle(e, student.id, isDone)}
+                aria-pressed={isDone}
+                className={`relative overflow-hidden p-4 sm:p-5 rounded-3xl border-2 select-none transition-all duration-300 flex flex-col items-center gap-2 active:scale-95 ${
                   isDone
-                    ? 'bg-emerald-900/60 border-emerald-400 shadow-xl shadow-emerald-950/60 scale-[1.02]'
-                    : 'bg-slate-900/80 border-slate-800 hover:border-indigo-400'
+                    ? 'bg-emerald-500/15 border-emerald-400 shadow-xl shadow-emerald-500/10'
+                    : 'bg-surface border-line hover:border-accent-soft'
                 }`}
               >
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-sm font-bold text-slate-400">{student.number}번</span>
-                    {isDone ? (
-                      <CheckCircle2 className="w-8 h-8 text-emerald-400" />
-                    ) : (
-                      <span className="w-4 h-4 rounded-full border-2 border-slate-600"></span>
-                    )}
-                  </div>
+                {prefs.showAvatars ? (
+                  <span
+                    key={tapKey[student.id]}
+                    className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center text-lg sm:text-xl font-black shrink-0 ${
+                      isDone ? 'ring-4 ring-emerald-400' : ''
+                    } ${isDone && prefs.animations ? 'animate-stamp' : ''}`}
+                    style={avatarStyle(student.name)}
+                    aria-hidden="true"
+                  >
+                    {initialsOf(student.name)}
+                  </span>
+                ) : (
+                  <span className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shrink-0 ${
+                    isDone ? 'bg-emerald-500 text-white' : 'bg-elevated text-faint border-2 border-dashed border-line-strong'
+                  }`}>
+                    {isDone
+                      ? <Check className="w-8 h-8 stroke-[3]" />
+                      : <span className="text-2xl font-black">{student.number}</span>}
+                  </span>
+                )}
 
-                  <h3 className="text-3xl font-black text-white mb-2">{student.name}</h3>
-
-                  {role ? (
-                    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl font-bold text-sm ${
-                      isDone ? 'bg-emerald-500/20 text-emerald-200' : 'bg-indigo-500/20 text-indigo-300'
-                    }`}>
-                      <RoleIcon name={role.icon} className="w-4 h-4" />
-                      <span>{role.title}</span>
-                    </div>
-                  ) : (
-                    <span className="text-xs font-semibold text-slate-500">미배정</span>
+                <div className="min-w-0 w-full text-center">
+                  {prefs.showNumbers && (
+                    <span className="block text-[11px] sm:text-xs font-bold text-faint">{student.number}번</span>
                   )}
+                  <h3 className="text-lg sm:text-2xl font-black text-ink truncate leading-tight">{student.name}</h3>
                 </div>
 
-                <p className="text-xs text-slate-400 mt-4 line-clamp-2">
-                  {role ? role.description : ''}
-                </p>
-              </div>
+                {role ? (
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl font-bold text-[11px] sm:text-sm max-w-full ${
+                    isDone ? 'bg-emerald-500/25 text-emerald-200' : 'bg-accent-soft/15 text-accent-text'
+                  }`}>
+                    <RoleIcon name={role.icon} className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">{role.title}</span>
+                  </span>
+                ) : (
+                  <span className="text-[11px] font-bold text-faint">미배정</span>
+                )}
+
+                {isDone && (
+                  <span className={`absolute top-2 right-2 w-7 h-7 rounded-full bg-emerald-500 text-white flex items-center justify-center ${
+                    prefs.animations ? 'animate-stamp' : ''
+                  }`}>
+                    <Check className="w-5 h-5 stroke-[3]" />
+                  </span>
+                )}
+              </button>
             );
           })}
         </div>
-      </div>
+      )}
 
-      {/* Footer hint */}
-      <div className="text-center text-slate-500 text-sm mt-8">
-        학생 이름을 터치하거나 클릭하면 완료 상태가 전환됩니다.
+      <div className="text-center text-muted text-sm mt-8 pb-2">
+        학생 이름을 터치하거나 클릭하면 완수 상태가 전환됩니다 · 돋보기 버튼으로 카드 크기를 조절하세요
       </div>
     </div>
   );

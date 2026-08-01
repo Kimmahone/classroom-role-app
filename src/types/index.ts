@@ -35,17 +35,18 @@ export interface CategoryPalette {
 
 export const CATEGORY_PALETTES: Record<string, CategoryPalette> = {
   indigo: {
-    label: '인디고',
-    chip: 'bg-slate-800 text-indigo-200 border-slate-700 hover:bg-indigo-600/20',
-    activeChip: 'bg-indigo-600 text-white border-indigo-400 shadow-md',
-    badge: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30',
-    bar: 'from-indigo-500 to-violet-400',
-    text: 'text-indigo-300',
-    dot: 'bg-indigo-500',
+    // 이 팔레트만 CSS 변수(--c-accent)를 따라가므로 환경설정의 강조색과 항상 같은 색이 된다.
+    label: '테마 강조색',
+    chip: 'bg-elevated text-accent-text border-line-strong hover:bg-accent/20',
+    activeChip: 'bg-accent text-white border-indigo-400 shadow-md',
+    badge: 'bg-accent-soft/15 text-accent-text border-accent-soft/30',
+    bar: 'from-accent-soft to-violet-400',
+    text: 'text-accent-text',
+    dot: 'bg-accent-soft',
   },
   emerald: {
     label: '에메랄드',
-    chip: 'bg-slate-800 text-emerald-200 border-slate-700 hover:bg-emerald-600/20',
+    chip: 'bg-elevated text-emerald-200 border-line-strong hover:bg-emerald-600/20',
     activeChip: 'bg-emerald-600 text-white border-emerald-400 shadow-md',
     badge: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
     bar: 'from-emerald-600 to-teal-400',
@@ -54,7 +55,7 @@ export const CATEGORY_PALETTES: Record<string, CategoryPalette> = {
   },
   amber: {
     label: '앰버',
-    chip: 'bg-slate-800 text-amber-200 border-slate-700 hover:bg-amber-600/20',
+    chip: 'bg-elevated text-amber-200 border-line-strong hover:bg-amber-600/20',
     activeChip: 'bg-amber-600 text-white border-amber-400 shadow-md',
     badge: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
     bar: 'from-amber-500 to-orange-400',
@@ -63,7 +64,7 @@ export const CATEGORY_PALETTES: Record<string, CategoryPalette> = {
   },
   purple: {
     label: '퍼플',
-    chip: 'bg-slate-800 text-purple-200 border-slate-700 hover:bg-purple-600/20',
+    chip: 'bg-elevated text-purple-200 border-line-strong hover:bg-purple-600/20',
     activeChip: 'bg-purple-600 text-white border-purple-400 shadow-md',
     badge: 'bg-purple-500/15 text-purple-300 border-purple-500/30',
     bar: 'from-purple-500 to-fuchsia-400',
@@ -72,7 +73,7 @@ export const CATEGORY_PALETTES: Record<string, CategoryPalette> = {
   },
   cyan: {
     label: '시안',
-    chip: 'bg-slate-800 text-cyan-200 border-slate-700 hover:bg-cyan-600/20',
+    chip: 'bg-elevated text-cyan-200 border-line-strong hover:bg-cyan-600/20',
     activeChip: 'bg-cyan-600 text-white border-cyan-400 shadow-md',
     badge: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
     bar: 'from-cyan-500 to-sky-400',
@@ -81,7 +82,7 @@ export const CATEGORY_PALETTES: Record<string, CategoryPalette> = {
   },
   rose: {
     label: '로즈',
-    chip: 'bg-slate-800 text-rose-200 border-slate-700 hover:bg-rose-600/20',
+    chip: 'bg-elevated text-rose-200 border-line-strong hover:bg-rose-600/20',
     activeChip: 'bg-rose-600 text-white border-rose-400 shadow-md',
     badge: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
     bar: 'from-rose-500 to-pink-400',
@@ -90,7 +91,7 @@ export const CATEGORY_PALETTES: Record<string, CategoryPalette> = {
   },
   blue: {
     label: '블루',
-    chip: 'bg-slate-800 text-blue-200 border-slate-700 hover:bg-blue-600/20',
+    chip: 'bg-elevated text-blue-200 border-line-strong hover:bg-blue-600/20',
     activeChip: 'bg-blue-600 text-white border-blue-400 shadow-md',
     badge: 'bg-blue-500/15 text-blue-300 border-blue-500/30',
     bar: 'from-blue-500 to-sky-400',
@@ -99,7 +100,7 @@ export const CATEGORY_PALETTES: Record<string, CategoryPalette> = {
   },
   lime: {
     label: '라임',
-    chip: 'bg-slate-800 text-lime-200 border-slate-700 hover:bg-lime-600/20',
+    chip: 'bg-elevated text-lime-200 border-line-strong hover:bg-lime-600/20',
     activeChip: 'bg-lime-600 text-white border-lime-400 shadow-md',
     badge: 'bg-lime-500/15 text-lime-300 border-lime-500/30',
     bar: 'from-lime-500 to-emerald-400',
@@ -157,6 +158,30 @@ export interface UserProfile {
   displayName: string | null;
   email: string | null;
   photoURL: string | null;
+}
+
+/**
+ * 학급(클래스). 한 교사가 여러 반을 맡거나 전담·동아리를 함께 운영할 수 있으므로
+ * 학생 명단 · 활동 범주 · 역할 · 배정 · 체크 기록 전부가 학급 단위로 분리된다.
+ * 클라우드에서는 users/{uid}/classrooms/{classroom.id} 문서 하나가 학급 하나에 대응한다.
+ */
+export interface Classroom {
+  id: string;
+  /** 예: "6학년 3반" */
+  name: string;
+  /** 예: "2026학년도" — 자유 문자열 */
+  term: string;
+  emoji: string;
+  /** CATEGORY_PALETTES 의 키 */
+  color: string;
+  createdAt: string;
+}
+
+/** 학급 카드에 함께 보여줄 요약 수치 */
+export interface ClassroomSummary {
+  studentCount: number;
+  roleCount: number;
+  categoryCount: number;
 }
 
 export interface Student {

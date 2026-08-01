@@ -1,18 +1,26 @@
-import React, { useState } from 'react';
-import { ViewMode, ActivityCategory, ActivityCategoryConfig, UserProfile, SyncState, paletteOf } from '../types';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  ViewMode, ActivityCategory, ActivityCategoryConfig, UserProfile, SyncState, Classroom, paletteOf
+} from '../types';
 import {
   LayoutDashboard, Shuffle, BarChart3, Settings, Monitor, Volume2, VolumeX,
-  Cloud, CloudOff, CloudUpload, ShieldAlert, LogIn, LogOut, Menu, X
+  Cloud, CloudOff, CloudUpload, ShieldAlert, LogIn, LogOut, Menu, X,
+  ChevronDown, Check, Plus, SlidersHorizontal, Sun, Moon
 } from 'lucide-react';
 import { soundFx } from '../utils/sound';
 import { RoleIcon } from './RoleIcon';
 import { getPeriodInfo } from '../utils/category';
+import { AppPrefs, resolveIsDark } from '../utils/prefs';
 
 interface HeaderProps {
   currentMode: ViewMode;
   onModeChange: (mode: ViewMode) => void;
-  soundEnabled: boolean;
-  onToggleSound: () => void;
+  prefs: AppPrefs;
+  onOpenTweaks: () => void;
+  classrooms: Classroom[];
+  activeClassId: string;
+  onSwitchClass: (classId: string) => void;
+  onOpenClassManager: () => void;
   categories: ActivityCategoryConfig[];
   activeCategory: ActivityCategory;
   onCategoryChange: (category: ActivityCategory) => void;
@@ -37,7 +45,7 @@ const SYNC_DISPLAY: Record<SyncState, { label: string; Icon: typeof Cloud; class
   off: {
     label: '로컬 전용 모드',
     Icon: CloudOff,
-    className: 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200',
+    className: 'bg-elevated text-muted border-line-strong hover:text-ink',
   },
   'needs-login': {
     label: '로그인 필요 (미동기화)',
@@ -47,7 +55,7 @@ const SYNC_DISPLAY: Record<SyncState, { label: string; Icon: typeof Cloud; class
   saving: {
     label: '클라우드 저장 중...',
     Icon: CloudUpload,
-    className: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40',
+    className: 'bg-accent-soft/20 text-accent-text border-accent-soft/40',
   },
   idle: {
     label: '클라우드 동기화 켜짐',
@@ -64,8 +72,12 @@ const SYNC_DISPLAY: Record<SyncState, { label: string; Icon: typeof Cloud; class
 export const Header: React.FC<HeaderProps> = ({
   currentMode,
   onModeChange,
-  soundEnabled,
-  onToggleSound,
+  prefs,
+  onOpenTweaks,
+  classrooms,
+  activeClassId,
+  onSwitchClass,
+  onOpenClassManager,
   categories,
   activeCategory,
   onCategoryChange,
@@ -79,9 +91,32 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenFirebaseModal,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [classMenuOpen, setClassMenuOpen] = useState(false);
+  const classMenuRef = useRef<HTMLDivElement>(null);
 
   const sync = SYNC_DISPLAY[syncState];
   const SyncIcon = sync.Icon;
+  const isDark = resolveIsDark(prefs.theme);
+
+  const activeClass = classrooms.find((c) => c.id === activeClassId) || classrooms[0];
+  const activePalette = paletteOf(activeClass?.color);
+
+  // 바깥을 누르거나 ESC 를 누르면 학급 드롭다운을 닫는다.
+  useEffect(() => {
+    if (!classMenuOpen) return;
+    const onPointer = (e: MouseEvent) => {
+      if (classMenuRef.current && !classMenuRef.current.contains(e.target as Node)) setClassMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setClassMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [classMenuOpen]);
 
   const handleNavigate = (mode: ViewMode) => {
     soundFx.playClick();
@@ -90,56 +125,111 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800">
+    <header className="sticky top-0 z-40 bg-surface/95 backdrop-blur-md border-b border-line">
 
-      {/* Top Navbar */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-20 gap-3">
+        <div className="flex items-center justify-between h-[72px] gap-3">
 
-          {/* Logo & Cloud Status */}
-          <div className="flex items-center gap-3 min-w-0">
-            <button
-              onClick={() => handleNavigate('dashboard')}
-              className="flex items-center justify-center w-12 h-12 shrink-0 rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-500 shadow-lg shadow-indigo-500/25"
-              aria-label="현황판으로 이동"
-            >
-              <span className="text-2xl">🏫</span>
-            </button>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-xl font-extrabold text-white tracking-tight truncate">
-                  우리 반 역할 &amp; 활동 현황판
-                </h1>
-                <span className="hidden sm:inline px-2 py-0.5 text-xs font-bold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
-                  {completedRatio}% 완수
+          {/* ── 학급 선택기 ─────────────────────────────────────── */}
+          <div className="flex items-center gap-2 min-w-0" ref={classMenuRef}>
+            <div className="relative min-w-0">
+              <button
+                onClick={() => {
+                  soundFx.playClick();
+                  setClassMenuOpen((v) => !v);
+                }}
+                aria-haspopup="menu"
+                aria-expanded={classMenuOpen}
+                className="flex items-center gap-2.5 pl-2 pr-2.5 py-2 rounded-2xl bg-elevated hover:bg-hover border border-line-strong transition min-w-0 max-w-[62vw] sm:max-w-none"
+              >
+                <span className={`w-9 h-9 shrink-0 rounded-xl border flex items-center justify-center text-lg ${activePalette.badge}`}>
+                  {activeClass?.emoji || '🏫'}
                 </span>
-              </div>
+                <span className="min-w-0 text-left">
+                  <span className="flex items-center gap-1.5">
+                    <span className="block text-sm sm:text-base font-extrabold text-ink truncate max-w-[38vw] sm:max-w-[220px]">
+                      {activeClass?.name || '학급 없음'}
+                    </span>
+                    <ChevronDown className={`w-4 h-4 shrink-0 text-muted transition ${classMenuOpen ? 'rotate-180' : ''}`} />
+                  </span>
+                  <span className="hidden sm:block text-[11px] font-semibold text-muted truncate max-w-[220px]">
+                    {activeClass?.term || '우리 반 역할 & 활동 현황판'}
+                  </span>
+                </span>
+              </button>
 
-              {/* Cloud sync status indicator */}
-              <div className="flex items-center gap-2 mt-0.5">
-                <button
-                  onClick={onOpenFirebaseModal}
-                  className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border transition ${sync.className}`}
-                  title={syncError || '클라우드 동기화 설정'}
+              {classMenuOpen && (
+                <div
+                  role="menu"
+                  className="absolute left-0 top-full mt-2 w-[280px] p-2 rounded-2xl bg-surface border border-line-strong shadow-2xl z-50 animate-pop"
                 >
-                  <SyncIcon className={`w-3 h-3 ${syncState === 'saving' ? 'animate-pulse' : ''}`} />
-                  <span className="truncate max-w-[180px]">{sync.label}</span>
-                </button>
-              </div>
+                  <p className="px-2.5 py-1.5 text-[11px] font-bold text-faint uppercase tracking-wide">
+                    학급 전환 ({classrooms.length})
+                  </p>
+                  <div className="max-h-[50vh] overflow-y-auto space-y-1">
+                    {classrooms.map((c) => {
+                      const p = paletteOf(c.color);
+                      const isActive = c.id === activeClassId;
+                      return (
+                        <button
+                          key={c.id}
+                          role="menuitem"
+                          onClick={() => {
+                            onSwitchClass(c.id);
+                            setClassMenuOpen(false);
+                          }}
+                          className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left transition ${
+                            isActive ? 'bg-accent-soft/15 border border-accent-soft/40' : 'hover:bg-elevated border border-transparent'
+                          }`}
+                        >
+                          <span className={`w-8 h-8 shrink-0 rounded-lg border flex items-center justify-center ${p.badge}`}>
+                            {c.emoji}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-bold text-ink truncate">{c.name}</span>
+                            {c.term && <span className="block text-[11px] text-muted truncate">{c.term}</span>}
+                          </span>
+                          {isActive && <Check className="w-4 h-4 text-accent-text shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setClassMenuOpen(false);
+                      onOpenClassManager();
+                    }}
+                    className="mt-1.5 w-full flex items-center gap-2 px-2.5 py-2.5 rounded-xl bg-elevated hover:bg-hover text-sm font-bold text-ink border border-line transition"
+                  >
+                    <Plus className="w-4 h-4 text-accent-text" /> 학급 추가 · 관리
+                  </button>
+                </div>
+              )}
             </div>
+
+            {/* 동기화 상태 (데스크톱) */}
+            <button
+              onClick={onOpenFirebaseModal}
+              className={`hidden lg:inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1.5 rounded-full border transition ${sync.className}`}
+              title={syncError || '클라우드 동기화 설정'}
+            >
+              <SyncIcon className={`w-3 h-3 ${syncState === 'saving' ? 'animate-pulse' : ''}`} />
+              <span className="truncate max-w-[150px]">{sync.label}</span>
+            </button>
           </div>
 
-          {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center gap-1 p-1.5 rounded-2xl bg-slate-800/80 border border-slate-700/60">
+          {/* ── 데스크톱 내비게이션 ──────────────────────────────── */}
+          <nav className="hidden md:flex items-center gap-1 p-1.5 rounded-2xl bg-elevated border border-line">
             {NAV_ITEMS.map(({ mode, label, Icon }) => (
               <button
                 key={mode}
                 onClick={() => handleNavigate(mode)}
                 aria-current={currentMode === mode ? 'page' : undefined}
-                className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition ${
+                className={`flex items-center gap-2 px-3.5 py-2 text-sm font-semibold rounded-xl transition ${
                   currentMode === mode
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'
+                    ? 'bg-accent text-white shadow-md shadow-accent/30'
+                    : 'text-muted hover:text-ink hover:bg-hover'
                 }`}
               >
                 <Icon className="w-4 h-4" />
@@ -148,27 +238,31 @@ export const Header: React.FC<HeaderProps> = ({
             ))}
           </nav>
 
-          {/* Action Tools */}
+          {/* ── 도구 ────────────────────────────────────────────── */}
           <div className="flex items-center gap-2 shrink-0">
 
-            {/* Google Authentication */}
+            <span className="hidden xl:inline px-2.5 py-1 text-xs font-bold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+              {completedRatio}% 완수
+            </span>
+
+            {/* Google 로그인 */}
             {userProfile ? (
-              <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-800 border border-slate-700">
+              <div className="hidden sm:flex items-center gap-2 p-1.5 rounded-2xl bg-elevated border border-line-strong">
                 {userProfile.photoURL ? (
-                  <img src={userProfile.photoURL} alt="" className="w-7 h-7 rounded-full border border-indigo-400" />
+                  <img src={userProfile.photoURL} alt="" className="w-7 h-7 rounded-full border border-accent-soft" />
                 ) : (
-                  <div className="w-7 h-7 rounded-full bg-indigo-600 flex items-center justify-center font-bold text-xs text-white">
+                  <div className="w-7 h-7 rounded-full bg-accent flex items-center justify-center font-bold text-xs text-white">
                     {userProfile.displayName ? userProfile.displayName[0] : 'G'}
                   </div>
                 )}
-                <span className="text-xs font-bold text-slate-200 hidden lg:inline max-w-[100px] truncate">
+                <span className="text-xs font-bold text-ink hidden lg:inline max-w-[90px] truncate">
                   {userProfile.displayName || '선생님'}
                 </span>
                 <button
                   onClick={onLogoutGoogle}
                   title="로그아웃"
                   aria-label="로그아웃"
-                  className="p-1 rounded-lg text-slate-400 hover:text-rose-400 transition"
+                  className="p-1 rounded-lg text-muted hover:text-rose-400 transition"
                 >
                   <LogOut className="w-4 h-4" />
                 </button>
@@ -176,38 +270,51 @@ export const Header: React.FC<HeaderProps> = ({
             ) : (
               <button
                 onClick={onLoginGoogle}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 transition"
+                className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-elevated hover:bg-hover text-ink font-bold text-xs border border-line-strong transition"
                 title="Google 계정으로 로그인"
               >
-                <LogIn className="w-3.5 h-3.5 text-indigo-400" />
-                <span className="hidden sm:inline">구글 로그인</span>
+                <LogIn className="w-3.5 h-3.5 text-accent-text" />
+                <span className="hidden lg:inline">구글 로그인</span>
               </button>
             )}
 
-            {/* Sound Toggle */}
+            {/* 화면 설정 (테마 아이콘이 현재 모드를 알려준다) */}
             <button
-              onClick={onToggleSound}
-              title={soundEnabled ? '효과음 켜짐' : '효과음 꺼짐'}
-              aria-label={soundEnabled ? '효과음 끄기' : '효과음 켜기'}
-              aria-pressed={soundEnabled}
-              className="hidden sm:block p-2.5 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700/70 transition"
+              onClick={() => {
+                soundFx.playClick();
+                onOpenTweaks();
+              }}
+              title="화면 & 사용 환경 설정 (라이트/다크 모드)"
+              aria-label="화면 설정 열기"
+              className="relative p-2.5 rounded-xl bg-elevated text-muted hover:bg-hover hover:text-ink border border-line-strong transition"
             >
-              {soundEnabled ? <Volume2 className="w-5 h-5 text-indigo-400" /> : <VolumeX className="w-5 h-5 text-slate-500" />}
+              <SlidersHorizontal className="w-5 h-5" />
+              <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-accent text-white flex items-center justify-center">
+                {isDark ? <Moon className="w-2.5 h-2.5" /> : <Sun className="w-2.5 h-2.5" />}
+              </span>
             </button>
 
-            {/* TV Mode (desktop) */}
+            {/* 효과음 상태 표시 */}
+            <span
+              className="hidden lg:flex items-center p-2.5 rounded-xl bg-elevated border border-line-strong text-muted"
+              title={prefs.sound ? '효과음 켜짐 (화면 설정에서 변경)' : '효과음 꺼짐 (화면 설정에서 변경)'}
+            >
+              {prefs.sound ? <Volume2 className="w-5 h-5 text-accent-text" /> : <VolumeX className="w-5 h-5 text-faint" />}
+            </span>
+
+            {/* TV 모드 */}
             <button
               onClick={() => handleNavigate('tv')}
               className="hidden md:flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-bold text-sm shadow-lg shadow-emerald-600/25 transition"
             >
               <Monitor className="w-4 h-4" />
-              <span>교실 TV 모드</span>
+              <span className="hidden lg:inline">교실 TV 모드</span>
             </button>
 
-            {/* Mobile menu toggle */}
+            {/* 모바일 메뉴 */}
             <button
               onClick={() => setMobileMenuOpen((v) => !v)}
-              className="md:hidden p-2.5 rounded-xl bg-slate-800 text-slate-200 border border-slate-700 transition"
+              className="md:hidden p-2.5 rounded-xl bg-elevated text-ink border border-line-strong transition"
               aria-label={mobileMenuOpen ? '메뉴 닫기' : '메뉴 열기'}
               aria-expanded={mobileMenuOpen}
             >
@@ -217,7 +324,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         </div>
 
-        {/* Mobile Navigation Panel */}
+        {/* ── 모바일 패널 ────────────────────────────────────────── */}
         {mobileMenuOpen && (
           <div className="md:hidden pb-4 space-y-2 animate-pop">
             <div className="grid grid-cols-2 gap-2">
@@ -228,8 +335,8 @@ export const Header: React.FC<HeaderProps> = ({
                   aria-current={currentMode === mode ? 'page' : undefined}
                   className={`flex items-center gap-2 px-4 py-3 text-sm font-bold rounded-2xl border transition ${
                     currentMode === mode
-                      ? 'bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/30'
-                      : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'
+                      ? 'bg-accent text-white border-accent-soft shadow-md shadow-accent/30'
+                      : 'bg-elevated text-muted border-line hover:text-ink'
                   }`}
                 >
                   <Icon className="w-4 h-4" />
@@ -247,14 +354,37 @@ export const Header: React.FC<HeaderProps> = ({
                 <span>교실 TV 모드</span>
               </button>
               <button
-                onClick={onToggleSound}
-                aria-label={soundEnabled ? '효과음 끄기' : '효과음 켜기'}
-                aria-pressed={soundEnabled}
-                className="p-3 rounded-2xl bg-slate-800 text-slate-300 border border-slate-700 transition"
+                onClick={() => { setMobileMenuOpen(false); onOpenTweaks(); }}
+                aria-label="화면 설정"
+                className="p-3 rounded-2xl bg-elevated text-muted border border-line transition"
               >
-                {soundEnabled ? <Volume2 className="w-5 h-5 text-indigo-400" /> : <VolumeX className="w-5 h-5 text-slate-500" />}
+                <SlidersHorizontal className="w-5 h-5" />
               </button>
             </div>
+
+            {userProfile ? (
+              <button
+                onClick={onLogoutGoogle}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-elevated text-muted border border-line text-xs font-bold"
+              >
+                <LogOut className="w-4 h-4" /> {userProfile.displayName || '선생님'} 로그아웃
+              </button>
+            ) : (
+              <button
+                onClick={onLoginGoogle}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-elevated text-ink border border-line text-xs font-bold"
+              >
+                <LogIn className="w-4 h-4 text-accent-text" /> 구글 로그인
+              </button>
+            )}
+
+            <button
+              onClick={onOpenFirebaseModal}
+              className={`w-full inline-flex items-center justify-center gap-1 text-[11px] font-semibold px-2 py-2 rounded-full border transition ${sync.className}`}
+            >
+              <SyncIcon className={`w-3 h-3 ${syncState === 'saving' ? 'animate-pulse' : ''}`} />
+              {sync.label}
+            </button>
 
             <div className="text-center text-[11px] font-bold text-emerald-300">
               오늘 완수율 {completedRatio}%
@@ -262,9 +392,9 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         )}
 
-        {/* Activity Category Quick Bar */}
-        <div className="flex items-center gap-2 py-2.5 border-t border-slate-800/80 overflow-x-auto">
-          <span className="text-xs font-bold text-slate-400 shrink-0 mr-1">🎯 활동 범주:</span>
+        {/* ── 활동 범주 퀵바 ─────────────────────────────────────── */}
+        <div className="flex items-center gap-2 py-2.5 border-t border-line overflow-x-auto">
+          <span className="text-xs font-bold text-muted shrink-0 mr-1">🎯 활동 범주:</span>
           {categories.map((cat) => {
             const palette = paletteOf(cat.color);
             const period = getPeriodInfo(cat, selectedDate);
@@ -287,7 +417,7 @@ export const Header: React.FC<HeaderProps> = ({
                 {period.status !== 'always' && (
                   <span
                     className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold ${
-                      isActive ? 'bg-black/25 text-white' : 'bg-slate-900/70 text-slate-300'
+                      isActive ? 'bg-black/25 text-white' : 'bg-surface/70 text-muted'
                     }`}
                   >
                     {period.status === 'ended' ? '종료' : period.status === 'upcoming' ? '예정' : period.label}
@@ -297,7 +427,7 @@ export const Header: React.FC<HeaderProps> = ({
             );
           })}
           {categories.length === 0 && (
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-faint">
               활동 범주가 없습니다. [교사 설정 → 활동 범주]에서 추가해 주세요.
             </span>
           )}

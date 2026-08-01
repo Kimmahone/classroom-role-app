@@ -1,5 +1,5 @@
 import { initializeApp, getApps, deleteApp, FirebaseApp } from 'firebase/app';
-import { getFirestore, doc, getDoc, setDoc, onSnapshot, Firestore } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, setDoc, deleteDoc, onSnapshot, Firestore } from 'firebase/firestore';
 import {
   getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult,
   signOut, onAuthStateChanged, Auth, User
@@ -283,5 +283,84 @@ export const saveClassroomDataToCloud = async (
     const error = e as Error;
     console.error('Cloud save error:', e);
     return { success: false, message: error.message };
+  }
+};
+
+/** 학급을 삭제할 때 클라우드 문서도 함께 지운다. */
+export const deleteClassroomFromCloud = async (
+  classroomId: string,
+  userUid: string | null | undefined
+): Promise<{ success: boolean; message?: string }> => {
+  if (!db || !classroomId) return { success: false, message: '클라우드가 초기화되지 않았습니다.' };
+  if (!userUid) return { success: false, message: '로그인이 필요합니다.' };
+
+  try {
+    await deleteDoc(classroomDoc(db, userUid, classroomId));
+    return { success: true };
+  } catch (e) {
+    const error = e as Error;
+    console.error('Cloud delete error:', e);
+    return { success: false, message: error.message };
+  }
+};
+
+// ── 학급 목록 & 교사 단위 데이터(메타 문서) ───────────────────────────
+// 개별 학급 문서와 분리해 두어야, 학급을 바꿔도 목록 자체는 항상 최신으로 유지된다.
+const metaDoc = (database: Firestore, userUid: string) =>
+  doc(database, 'users', userUid, 'appMeta', 'classIndex');
+
+export const subscribeToClassIndex = (
+  onData: (data: Record<string, unknown>, fromLocalWrite: boolean) => void,
+  userUid: string | null | undefined,
+  onError?: (message: string) => void
+): (() => void) | null => {
+  if (!db || !userUid) return null;
+
+  try {
+    return onSnapshot(
+      metaDoc(db, userUid),
+      (snapshot) => {
+        if (snapshot.exists()) onData(snapshot.data(), snapshot.metadata.hasPendingWrites);
+      },
+      (err) => {
+        console.warn('Class index snapshot error:', err);
+        onError?.(err.message);
+      }
+    );
+  } catch (e) {
+    console.error('Class index subscribe error:', e);
+    return null;
+  }
+};
+
+export const saveClassIndexToCloud = async (
+  data: Record<string, unknown>,
+  userUid: string | null | undefined
+): Promise<{ success: boolean; message?: string }> => {
+  if (!db) return { success: false, message: '클라우드가 초기화되지 않았습니다.' };
+  if (!userUid) return { success: false, message: '로그인이 필요합니다.' };
+
+  try {
+    await setDoc(metaDoc(db, userUid), { ...data, updatedAt: new Date().toISOString() }, { merge: true });
+    return { success: true };
+  } catch (e) {
+    const error = e as Error;
+    console.error('Class index save error:', e);
+    return { success: false, message: error.message };
+  }
+};
+
+/** 학급을 전환했을 때 클라우드에 그 학급 데이터가 이미 있으면 한 번만 가져온다. */
+export const fetchClassroomDataOnce = async (
+  classroomId: string,
+  userUid: string | null | undefined
+): Promise<Record<string, unknown> | null> => {
+  if (!db || !classroomId || !userUid) return null;
+  try {
+    const snap = await getDoc(classroomDoc(db, userUid, classroomId));
+    return snap.exists() ? snap.data() : null;
+  } catch (e) {
+    console.warn('Classroom fetch error:', e);
+    return null;
   }
 };

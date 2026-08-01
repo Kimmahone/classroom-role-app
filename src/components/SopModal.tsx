@@ -12,27 +12,27 @@ export const SopModal: React.FC<SopModalProps> = ({ role, onClose }) => {
   if (!role) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-pop">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim/70 backdrop-blur-md animate-pop">
       <div 
-        className="relative w-full max-w-lg overflow-hidden rounded-3xl border border-slate-700 bg-slate-900 p-6 sm:p-8 shadow-2xl"
+        className="relative w-full max-w-lg overflow-hidden rounded-3xl border border-line-strong bg-surface p-6 sm:p-8 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-start justify-between pb-6 border-b border-slate-800">
+        <div className="flex items-start justify-between pb-6 border-b border-line">
           <div className="flex items-center gap-4">
-            <div className="p-3.5 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
+            <div className="p-3.5 rounded-2xl bg-accent-soft/10 border border-accent-soft/20 text-accent-text">
               <RoleIcon name={role.icon} className="w-8 h-8" />
             </div>
             <div>
-              <span className="inline-block px-2.5 py-0.5 mb-1 text-xs font-semibold rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+              <span className="inline-block px-2.5 py-0.5 mb-1 text-xs font-semibold rounded-full bg-elevated text-muted border border-line-strong">
                 {role.category.toUpperCase()}
               </span>
-              <h2 className="text-2xl font-bold text-white">{role.title}</h2>
+              <h2 className="text-2xl font-bold text-ink">{role.title}</h2>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+            className="p-2 rounded-xl text-muted hover:text-ink hover:bg-elevated transition"
           >
             <X className="w-6 h-6" />
           </button>
@@ -41,14 +41,14 @@ export const SopModal: React.FC<SopModalProps> = ({ role, onClose }) => {
         {/* Content */}
         <div className="mt-6 space-y-6">
           {/* Description */}
-          <div className="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/50">
-            <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-1">역할 개요</h4>
-            <p className="text-slate-200 text-sm leading-relaxed">{role.description}</p>
+          <div className="p-4 rounded-2xl bg-elevated/60 border border-line-strong/50">
+            <h4 className="text-xs font-bold text-accent-text uppercase tracking-wider mb-1">역할 개요</h4>
+            <p className="text-ink text-sm leading-relaxed">{role.description}</p>
           </div>
 
           {/* SOP Step-by-Step */}
           <div>
-            <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+            <h4 className="text-sm font-bold text-ink mb-3 flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
               세부 수행 지침 (SOP)
             </h4>
@@ -56,16 +56,16 @@ export const SopModal: React.FC<SopModalProps> = ({ role, onClose }) => {
             {role.sopSteps && role.sopSteps.length > 0 ? (
               <div className="space-y-3">
                 {role.sopSteps.map((step, idx) => (
-                  <div key={idx} className="flex items-start gap-3 p-3 rounded-xl bg-slate-800/30 border border-slate-800">
-                    <span className="flex items-center justify-center shrink-0 w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold">
+                  <div key={idx} className="flex items-start gap-3 p-3 rounded-xl bg-elevated/30 border border-line">
+                    <span className="flex items-center justify-center shrink-0 w-6 h-6 rounded-full bg-accent text-white text-xs font-bold">
                       {idx + 1}
                     </span>
-                    <p className="text-sm text-slate-300 pt-0.5">{step}</p>
+                    <p className="text-sm text-muted pt-0.5">{step}</p>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-slate-400 italic">등록된 상세 수행 지침이 없습니다.</p>
+              <p className="text-sm text-muted italic">등록된 상세 수행 지침이 없습니다.</p>
             )}
           </div>
 
@@ -79,10 +79,10 @@ export const SopModal: React.FC<SopModalProps> = ({ role, onClose }) => {
         </div>
 
         {/* Footer */}
-        <div className="mt-8 pt-4 border-t border-slate-800 flex justify-end">
+        <div className="mt-8 pt-4 border-t border-line flex justify-end">
           <button
             onClick={onClose}
-            className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-sm transition shadow-lg shadow-indigo-600/30"
+            className="px-6 py-2.5 rounded-xl bg-accent hover:bg-accent-soft text-white font-medium text-sm transition shadow-lg shadow-accent/30"
           >
             확인했습니다
           </button>

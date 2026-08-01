@@ -2,56 +2,214 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ══════════════════════════════════════════════════════════════════════
+   테마 토큰
+   tailwind.config.js 의 base/surface/elevated/... 색상이 이 변수를 읽는다.
+   html 요소에 .dark 또는 .light 클래스가 붙고, data-accent 로 강조색이 바뀐다.
+   ══════════════════════════════════════════════════════════════════════ */
+:root {
+  --ui-scale: 1;
+  --c-base: 2 6 23;
+  --c-surface: 15 23 42;
+  --c-elevated: 30 41 59;
+  --c-hover: 51 65 85;
+  --c-line: 30 41 59;
+  --c-line-strong: 51 65 85;
+  --c-ink: 255 255 255;
+  --c-muted: 148 163 184;
+  --c-faint: 100 116 139;
+  --c-scrim: 2 6 23;
+
+  --c-accent: 79 70 229;
+  --c-accent-soft: 99 102 241;
+  --c-accent-strong: 67 56 202;
+  --c-accent-text: 165 180 252;
+
+  --glass-panel: rgba(30, 41, 59, 0.7);
+  --glass-card: rgba(30, 41, 59, 0.6);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --shadow-soft: 0 10px 30px -12px rgba(2, 6, 23, 0.7);
+}
+
+html.light {
+  --c-base: 241 245 249;
+  --c-surface: 255 255 255;
+  --c-elevated: 241 245 249;
+  --c-hover: 226 232 240;
+  --c-line: 226 232 240;
+  --c-line-strong: 203 213 225;
+  --c-ink: 15 23 42;
+  --c-muted: 71 85 105;
+  --c-faint: 100 116 139;
+  --c-scrim: 15 23 42;
+
+  --c-accent-text: 67 56 202;
+
+  --glass-panel: rgba(255, 255, 255, 0.85);
+  --glass-card: rgba(255, 255, 255, 0.75);
+  --glass-border: rgba(15, 23, 42, 0.08);
+  --shadow-soft: 0 10px 30px -14px rgba(15, 23, 42, 0.25);
+}
+
+/* ── 강조색 프리셋 ────────────────────────────────────────────── */
+html[data-accent='indigo'] { --c-accent: 79 70 229;  --c-accent-soft: 99 102 241; --c-accent-strong: 67 56 202; --c-accent-text: 165 180 252; }
+html[data-accent='emerald']{ --c-accent: 5 150 105;  --c-accent-soft: 16 185 129; --c-accent-strong: 4 120 87;  --c-accent-text: 110 231 183; }
+html[data-accent='rose']   { --c-accent: 225 29 72;  --c-accent-soft: 244 63 94;  --c-accent-strong: 190 18 60; --c-accent-text: 253 164 175; }
+html[data-accent='amber']  { --c-accent: 217 119 6;  --c-accent-soft: 245 158 11; --c-accent-strong: 180 83 9;  --c-accent-text: 252 211 77; }
+html[data-accent='cyan']   { --c-accent: 8 145 178;  --c-accent-soft: 6 182 212;  --c-accent-strong: 14 116 144;--c-accent-text: 103 232 249; }
+html[data-accent='purple'] { --c-accent: 147 51 234; --c-accent-soft: 168 85 247; --c-accent-strong: 126 34 206;--c-accent-text: 216 180 254; }
+
+html.light[data-accent='indigo']  { --c-accent-text: 67 56 202; }
+html.light[data-accent='emerald'] { --c-accent-text: 4 120 87; }
+html.light[data-accent='rose']    { --c-accent-text: 190 18 60; }
+html.light[data-accent='amber']   { --c-accent-text: 180 83 9; }
+html.light[data-accent='cyan']    { --c-accent-text: 14 116 144; }
+html.light[data-accent='purple']  { --c-accent-text: 126 34 206; }
+
 @layer base {
+  html {
+    font-size: calc(16px * var(--ui-scale));
+  }
   body {
-    background-color: #0f172a;
-    color: #f8fafc;
+    background-color: rgb(var(--c-base));
+    color: rgb(var(--c-ink));
     font-family: 'Noto Sans KR', sans-serif;
+    transition: background-color 0.25s ease, color 0.25s ease;
   }
 }
 
-/* Glassmorphism & Custom Scrollbar */
+/* ══════════════════════════════════════════════════════════════════════
+   라이트 모드에서 대비가 무너지는 의미색(성공/경고/위험 등) 보정.
+   중립색과 브랜드색은 토큰이 처리하므로 여기서는 다루지 않는다.
+   ══════════════════════════════════════════════════════════════════════ */
+html.light .text-emerald-100,
+html.light .text-emerald-200,
+html.light .text-emerald-300,
+html.light .text-emerald-400 { color: #047857; }
+html.light .text-emerald-100\/70 { color: rgb(4 120 87 / 0.85); }
+html.light .text-emerald-100\/80 { color: rgb(4 120 87 / 0.9); }
+html.light .text-emerald-100\/90 { color: rgb(4 120 87 / 0.95); }
+
+html.light .text-amber-100,
+html.light .text-amber-200,
+html.light .text-amber-300,
+html.light .text-amber-400 { color: #b45309; }
+html.light .text-amber-100\/90 { color: rgb(180 83 9 / 0.95); }
+html.light .text-amber-300\/70 { color: rgb(180 83 9 / 0.8); }
+
+html.light .text-rose-200,
+html.light .text-rose-300,
+html.light .text-rose-400,
+html.light .hover\:text-rose-300:hover,
+html.light .hover\:text-rose-400:hover { color: #be123c; }
+
+html.light .text-cyan-200,
+html.light .text-cyan-300,
+html.light .text-cyan-400 { color: #0e7490; }
+
+html.light .text-sky-300 { color: #0369a1; }
+html.light .text-blue-200,
+html.light .text-blue-300 { color: #1d4ed8; }
+html.light .text-lime-200,
+html.light .text-lime-300 { color: #4d7c0f; }
+html.light .text-purple-200,
+html.light .text-purple-300 { color: #7e22ce; }
+html.light .text-teal-300 { color: #0f766e; }
+
+/* 어두운 배경 위 흰 글씨를 전제로 한 반투명 칩은 라이트에서 더 진하게 */
+html.light .bg-emerald-500\/10 { background-color: rgb(16 185 129 / 0.14); }
+html.light .bg-amber-500\/10 { background-color: rgb(245 158 11 / 0.16); }
+html.light .bg-rose-500\/10 { background-color: rgb(244 63 94 / 0.14); }
+
+/* ── 유리 패널 ─────────────────────────────────────────────────── */
 .glass-panel {
-  background: rgba(30, 41, 59, 0.7);
+  background: var(--glass-panel);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--glass-border);
 }
 
 .glass-card {
-  background: rgba(30, 41, 59, 0.6);
+  background: var(--glass-card);
   backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--glass-border);
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .glass-card:hover {
-  border-color: rgba(99, 102, 241, 0.4);
+  border-color: rgb(var(--c-accent-soft) / 0.4);
   transform: translateY(-2px);
 }
 
-/* Custom Scrollbar */
+/* ── 스크롤바 ─────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.6);
+  background: rgb(var(--c-base) / 0.6);
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(51, 65, 85, 0.8);
+  background: rgb(var(--c-line-strong) / 0.9);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(71, 85, 105, 1);
+  background: rgb(var(--c-muted) / 0.9);
 }
 
-/* Progress bar shimmer effect */
+/* ── 현황판 인터랙션 ───────────────────────────────────────────── */
 @keyframes shimmer {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(100%); }
 }
-
 .animate-shimmer {
   animation: shimmer 2s infinite;
+}
+
+/* 탭했을 때 카드에서 번지는 물결 */
+.tap-ripple {
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+  width: 40px;
+  height: 40px;
+  margin-left: -20px;
+  margin-top: -20px;
+  background: radial-gradient(circle, rgb(16 185 129 / 0.55) 0%, rgb(16 185 129 / 0) 70%);
+}
+
+/* 완수 카드가 아래에서 위로 채워지는 효과 */
+.fill-sweep::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(to top, rgb(16 185 129 / 0.28), rgb(16 185 129 / 0));
+  animation: fillSweep 0.5s ease-out both;
+}
+@keyframes fillSweep {
+  0% { clip-path: inset(100% 0 0 0); }
+  100% { clip-path: inset(0 0 0 0); }
+}
+
+/* 진행 링 채우기 */
+.ring-progress {
+  transition: stroke-dashoffset 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 사용자가 애니메이션 최소화를 선택했을 때 */
+html.no-motion *,
+html.no-motion *::before,
+html.no-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
 }

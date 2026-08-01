@@ -1,16 +1,17 @@
 import React, { useMemo, useState } from 'react';
 import {
   Student, Role, RolePreset, FirebaseConfig, ActivityCategory, ActivityCategoryConfig,
-  SyncState, UserProfile, CATEGORY_PALETTES, paletteOf
+  SyncState, UserProfile, Classroom, CATEGORY_PALETTES, paletteOf
 } from '../types';
 import { BUILTIN_ROLE_PRESETS, exportDataToJson, importDataFromJson, getTodayKey } from '../utils/storage';
 import { getPeriodInfo, PERIOD_BADGE_CLASS, makeCategoryId } from '../utils/category';
 import { RoleIcon, AVAILABLE_ICONS } from './RoleIcon';
+import { ClassManagerPanel } from './ClassManagerPanel';
 import { soundFx } from '../utils/sound';
 import {
   Users, Briefcase, Download, Upload, Plus, Trash2, Edit, Sparkles, BookOpen, Layers, Cloud, X,
   ShieldAlert, LogIn, ShieldCheck, Search, CalendarClock, ArrowUp, ArrowDown, Copy, CheckSquare, Square,
-  Tag, Wand2
+  Tag, Wand2, School, SlidersHorizontal
 } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -20,20 +21,27 @@ interface SettingsViewProps {
   firebaseConfig: FirebaseConfig;
   categories: ActivityCategoryConfig[];
   activeCategory: ActivityCategory;
+  classrooms: Classroom[];
+  activeClassId: string;
   syncState: SyncState;
   syncError: string | null;
   userProfile: UserProfile | null;
   onLoginGoogle: () => void;
+  onSwitchClass: (classId: string) => void;
+  onCreateClass: (draft: Omit<Classroom, 'id' | 'createdAt'>, copyFromClassId?: string) => void;
+  onUpdateClass: (updated: Classroom) => void;
+  onDeleteClass: (classId: string) => void;
   onUpdateStudents: (students: Student[]) => void;
   onUpdateRoles: (roles: Role[]) => void;
   onUpdateCategories: (categories: ActivityCategoryConfig[]) => void;
   onUpdateCustomPresets: (presets: RolePreset[]) => void;
   onOpenFirebaseModal: () => void;
   onOpenPresetModal: (preset: RolePreset | null) => void;
+  onOpenTweaks: () => void;
   onRefreshData: () => void;
 }
 
-type SettingsTab = 'students' | 'categories' | 'roles' | 'presets' | 'cloud' | 'backup';
+type SettingsTab = 'classes' | 'students' | 'categories' | 'roles' | 'presets' | 'cloud' | 'backup';
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   students,
@@ -42,19 +50,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   firebaseConfig,
   categories,
   activeCategory,
+  classrooms,
+  activeClassId,
   syncState,
   syncError,
   userProfile,
   onLoginGoogle,
+  onSwitchClass,
+  onCreateClass,
+  onUpdateClass,
+  onDeleteClass,
   onUpdateStudents,
   onUpdateRoles,
   onUpdateCategories,
   onUpdateCustomPresets,
   onOpenFirebaseModal,
   onOpenPresetModal,
+  onOpenTweaks,
   onRefreshData,
 }) => {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('students');
+  const [activeTab, setActiveTab] = useState<SettingsTab>('classes');
+
+  const activeClassroom = classrooms.find((c) => c.id === activeClassId);
 
   // Student Bulk Add
   const [bulkText, setBulkText] = useState('');
@@ -361,12 +378,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // Export / Import
   const handleExport = () => {
     soundFx.playClick();
-    const jsonStr = exportDataToJson();
+    const jsonStr = exportDataToJson(activeClassId, activeClassroom);
     const blob = new Blob([jsonStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
+    const safeName = (activeClassroom?.name || '학급').replace(/[\\/:*?"<>|]/g, '_');
     a.href = url;
-    a.download = `학급_역할관리_통합백업_${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `${safeName}_역할관리백업_${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -375,7 +393,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!confirm('백업 파일의 내용으로 현재 학생 명단·역할·기록을 덮어씁니다.\n계속하시겠습니까?')) {
+    if (!confirm(
+      `백업 파일의 내용으로 [${activeClassroom?.name || '현재 학급'}]의 학생 명단·역할·기록을 덮어씁니다.\n` +
+      '다른 학급의 데이터는 영향을 받지 않습니다.\n\n계속하시겠습니까?'
+    )) {
       e.target.value = '';
       return;
     }
@@ -384,7 +405,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     reader.onload = (evt) => {
       const content = evt.target?.result as string;
       const result = content
-        ? importDataFromJson(content)
+        ? importDataFromJson(content, activeClassId)
         : { success: false, message: '파일을 읽을 수 없습니다.', imported: [] };
 
       if (result.success) {
@@ -405,7 +426,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     <button
       onClick={() => setActiveTab(id)}
       className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition ${
-        activeTab === id ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'
+        activeTab === id ? 'bg-accent text-white' : 'bg-elevated text-muted hover:text-ink'
       }`}
     >
       <Icon className={`w-4 h-4 ${activeTab === id ? '' : iconClass}`} /> {label}
@@ -416,14 +437,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     <div className="space-y-8 animate-pop">
 
       {/* Header */}
-      <div className="p-6 rounded-3xl glass-panel border border-slate-700/60 shadow-xl">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="p-6 rounded-3xl glass-panel border border-line-strong/60 shadow-xl">
+        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-extrabold text-white">⚙️ 교사 통합 설정 &amp; 데이터 관리</h2>
-            <p className="text-sm text-slate-400">학생 명단, 활동 범주와 기간, 역할 목록, 클라우드, 템플릿 및 JSON 관리를 수행합니다.</p>
+            <h2 className="text-2xl font-extrabold text-ink">⚙️ 교사 통합 설정 &amp; 데이터 관리</h2>
+            <p className="text-sm text-muted">학급, 학생 명단, 활동 범주와 기간, 역할 목록, 클라우드, 템플릿 및 JSON 관리를 수행합니다.</p>
+            <div className="flex flex-wrap items-center gap-2 mt-2.5">
+              <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-lg bg-accent-soft/15 text-accent-text border border-accent-soft/30">
+                <School className="w-3.5 h-3.5" />
+                지금 편집 중: {activeClassroom?.emoji} {activeClassroom?.name || '학급 없음'}
+              </span>
+              <button
+                onClick={onOpenTweaks}
+                className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-lg bg-elevated text-muted border border-line hover:text-ink transition"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5" /> 화면 설정 (라이트/다크)
+              </button>
+            </div>
           </div>
 
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
+            {tabButton('classes', `학급 (${classrooms.length})`, School, 'text-accent-text')}
             {tabButton('students', `학생 명단 (${students.length})`, Users)}
             {tabButton('categories', `활동 범주 (${categories.length})`, Tag, 'text-rose-400')}
             {tabButton('roles', `역할 관리 (${roles.length})`, Briefcase)}
@@ -434,45 +468,78 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       </div>
 
+      {/* ══ TAB 0: 학급 관리 ═══════════════════════════════════════════ */}
+      {activeTab === 'classes' && (
+        <div className="space-y-5">
+          <div>
+            <h3 className="text-lg font-bold text-ink">학급 관리 ({classrooms.length}개)</h3>
+            <p className="text-xs text-muted">
+              반마다 학생 명단·활동 범주·역할·배정·완수 기록이 완전히 따로 저장됩니다.
+              전담·동아리·방과후처럼 구성원이 다른 집단도 각각 학급으로 만들어 관리하세요.
+            </p>
+          </div>
+
+          <ClassManagerPanel
+            classrooms={classrooms}
+            activeClassId={activeClassId}
+            onSwitchClass={onSwitchClass}
+            onCreateClass={onCreateClass}
+            onUpdateClass={onUpdateClass}
+            onDeleteClass={onDeleteClass}
+          />
+
+          <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex gap-3">
+            <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+            <div className="text-xs text-emerald-100/90 space-y-1">
+              <p className="font-bold text-emerald-300">클라우드에서도 학급별로 분리 저장됩니다</p>
+              <p className="text-emerald-100/70 leading-relaxed">
+                Google 로그인 상태라면 학급 하나가 <span className="font-mono">users/{'{내 계정}'}/classrooms/{'{학급 ID}'}</span> 문서
+                하나에 대응합니다. 학급을 삭제하면 그 문서도 함께 삭제되며, 다른 학급 데이터는 그대로 남습니다.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ══ TAB 1: 학생 명단 ══════════════════════════════════════════ */}
       {activeTab === 'students' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="space-y-6">
-            <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl">
-              <h3 className="text-lg font-bold text-white mb-4">학생 개별 추가</h3>
+            <div className="p-6 rounded-3xl bg-surface border border-line shadow-xl">
+              <h3 className="text-lg font-bold text-ink mb-4">학생 개별 추가</h3>
               <form onSubmit={handleAddSingleStudent} className="space-y-4">
                 <div>
-                  <label className="text-xs font-bold text-slate-400 mb-1 block">학생 이름</label>
+                  <label className="text-xs font-bold text-muted mb-1 block">학생 이름</label>
                   <input
                     type="text"
                     placeholder="예: 김민수"
                     value={newStudentName}
                     onChange={(e) => setNewStudentName(e.target.value)}
-                    className="w-full bg-slate-800 text-white text-sm px-4 py-2.5 rounded-xl border border-slate-700 focus:ring-2 focus:ring-indigo-500"
+                    className="w-full bg-elevated text-ink text-sm px-4 py-2.5 rounded-xl border border-line-strong focus:ring-2 focus:ring-accent"
                   />
                 </div>
                 <button
                   type="submit"
-                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold shadow-lg shadow-indigo-600/30 transition"
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-accent hover:bg-accent-soft text-white text-sm font-bold shadow-lg shadow-accent/30 transition"
                 >
                   <Plus className="w-4 h-4" /> 학생 1명 추가
                 </button>
               </form>
             </div>
 
-            <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl">
+            <div className="p-6 rounded-3xl bg-surface border border-line shadow-xl">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-lg font-bold text-white">명단 1초 일괄 등록</h3>
+                <h3 className="text-lg font-bold text-ink">명단 1초 일괄 등록</h3>
                 <Sparkles className="w-5 h-5 text-amber-400" />
               </div>
-              <p className="text-xs text-slate-400 mb-4">
+              <p className="text-xs text-muted mb-4">
                 줄바꿈으로 구분된 전체 학급 명단을 한 번에 붙여넣어 자동 번호 생성으로 추가합니다.
               </p>
 
               {!showBulkInput ? (
                 <button
                   onClick={() => setShowBulkInput(true)}
-                  className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 font-bold text-sm border border-slate-700 transition"
+                  className="w-full py-2.5 rounded-xl bg-elevated hover:bg-hover text-accent-text font-bold text-sm border border-line-strong transition"
                 >
                   전체 명단 붙여넣기 창 열기
                 </button>
@@ -483,7 +550,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     placeholder={`강도윤\n김민수\n박서준\n이지원...`}
                     value={bulkText}
                     onChange={(e) => setBulkText(e.target.value)}
-                    className="w-full bg-slate-800 text-white text-xs p-3 rounded-xl border border-slate-700 font-mono"
+                    className="w-full bg-elevated text-ink text-xs p-3 rounded-xl border border-line-strong font-mono"
                   />
                   <div className="flex gap-2">
                     <button
@@ -494,7 +561,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </button>
                     <button
                       onClick={() => setShowBulkInput(false)}
-                      className="px-3 py-2 rounded-xl bg-slate-800 text-slate-400 font-bold text-xs"
+                      className="px-3 py-2 rounded-xl bg-elevated text-muted font-bold text-xs"
                     >
                       취소
                     </button>
@@ -504,9 +571,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
 
-          <div className="lg:col-span-2 p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl">
-            <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-800">
-              <h3 className="text-lg font-bold text-white">등록된 학생 목록 ({students.length}명)</h3>
+          <div className="lg:col-span-2 p-6 rounded-3xl bg-surface border border-line shadow-xl">
+            <div className="flex items-center justify-between pb-4 mb-4 border-b border-line">
+              <h3 className="text-lg font-bold text-ink">등록된 학생 목록 ({students.length}명)</h3>
               {students.length > 0 && (
                 <button
                   onClick={() => {
@@ -526,15 +593,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 {students.map((student) => (
                   <div
                     key={student.id}
-                    className="flex items-center justify-between p-3 rounded-2xl bg-slate-800/60 border border-slate-800 hover:border-slate-700 transition"
+                    className="flex items-center justify-between p-3 rounded-2xl bg-elevated/60 border border-line hover:border-line-strong transition"
                   >
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-slate-500">{student.number}번</span>
-                      <span className="font-bold text-slate-100 text-sm">{student.name}</span>
+                      <span className="text-xs font-bold text-faint">{student.number}번</span>
+                      <span className="font-bold text-ink text-sm">{student.name}</span>
                     </div>
                     <button
                       onClick={() => handleDeleteStudent(student.id)}
-                      className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
+                      className="p-1 rounded-lg text-faint hover:text-rose-400 hover:bg-rose-500/10 transition"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -542,7 +609,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 ))}
               </div>
             ) : (
-              <div className="text-center py-12 text-slate-500 text-sm">
+              <div className="text-center py-12 text-faint text-sm">
                 등록된 학생이 없습니다. 좌측에서 학생을 추가해 주세요.
               </div>
             )}
@@ -555,8 +622,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h3 className="text-lg font-bold text-white">활동 범주 &amp; 운영 기간 설정 ({categories.length}종)</h3>
-              <p className="text-xs text-slate-400">
+              <h3 className="text-lg font-bold text-ink">활동 범주 &amp; 운영 기간 설정 ({categories.length}종)</h3>
+              <p className="text-xs text-muted">
                 범주를 직접 추가·수정·삭제하고, 활동마다 시작일과 종료일을 지정할 수 있습니다. 기간은 현황판과 헤더에 함께 표시됩니다.
               </p>
             </div>
@@ -575,7 +642,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               return (
                 <div
                   key={cat.id}
-                  className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center gap-4"
+                  className="p-4 rounded-2xl bg-surface border border-line flex flex-col sm:flex-row sm:items-center gap-4"
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-1">
                     <span className={`p-2.5 rounded-xl border shrink-0 ${palette.badge}`}>
@@ -583,8 +650,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </span>
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h4 className="font-bold text-white truncate">{cat.name}</h4>
-                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-slate-800 text-slate-400 border border-slate-700">
+                        <h4 className="font-bold text-ink truncate">{cat.name}</h4>
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-elevated text-muted border border-line-strong">
                           역할 {rolesInCategory(cat.id)}종
                         </span>
                         <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-lg border ${PERIOD_BADGE_CLASS[period.status]}`}>
@@ -592,7 +659,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           {period.rangeLabel ? `${period.rangeLabel} · ${period.label}` : '상시 운영'}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-400 mt-1 line-clamp-1">{cat.description || '설명 없음'}</p>
+                      <p className="text-xs text-muted mt-1 line-clamp-1">{cat.description || '설명 없음'}</p>
                     </div>
                   </div>
 
@@ -601,7 +668,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       onClick={() => handleMoveCategory(index, -1)}
                       disabled={index === 0}
                       title="위로 이동"
-                      className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition"
+                      className="p-2 rounded-lg text-muted hover:text-ink hover:bg-elevated disabled:opacity-30 disabled:hover:bg-transparent transition"
                     >
                       <ArrowUp className="w-4 h-4" />
                     </button>
@@ -609,7 +676,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       onClick={() => handleMoveCategory(index, 1)}
                       disabled={index === categories.length - 1}
                       title="아래로 이동"
-                      className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition"
+                      className="p-2 rounded-lg text-muted hover:text-ink hover:bg-elevated disabled:opacity-30 disabled:hover:bg-transparent transition"
                     >
                       <ArrowDown className="w-4 h-4" />
                     </button>
@@ -620,14 +687,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         setEditingCategory({ ...cat });
                       }}
                       title="범주 수정"
-                      className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                      className="p-2 rounded-lg text-muted hover:text-ink hover:bg-elevated transition"
                     >
                       <Edit className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => handleDeleteCategory(cat)}
                       title="범주 삭제"
-                      className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition"
+                      className="p-2 rounded-lg text-muted hover:text-rose-400 hover:bg-rose-500/10 transition"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -639,15 +706,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
           {/* 범주 편집 모달 */}
           {editingCategory && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-pop">
-              <div className="w-full max-w-xl bg-slate-900 border border-slate-700 rounded-3xl p-6 sm:p-8 space-y-6 max-h-[90vh] overflow-y-auto">
-                <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-                  <h3 className="text-xl font-bold text-white">
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim/70 backdrop-blur-md animate-pop">
+              <div className="w-full max-w-xl bg-surface border border-line-strong rounded-3xl p-6 sm:p-8 space-y-6 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between pb-4 border-b border-line">
+                  <h3 className="text-xl font-bold text-ink">
                     {isNewCategory ? '새 활동 범주 만들기' : '활동 범주 수정'}
                   </h3>
                   <button
                     onClick={() => { setEditingCategory(null); setIsNewCategory(false); }}
-                    className="p-2 text-slate-400 hover:text-white"
+                    className="p-2 text-muted hover:text-ink"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -655,52 +722,52 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                 <form onSubmit={handleSaveCategory} className="space-y-4">
                   <div>
-                    <label className="text-xs font-bold text-slate-400 mb-1 block">범주 이름</label>
+                    <label className="text-xs font-bold text-muted mb-1 block">범주 이름</label>
                     <input
                       type="text"
                       required
                       placeholder="예: 2학기 학급 동아리"
                       value={editingCategory.name}
                       onChange={(e) => setEditingCategory({ ...editingCategory, name: e.target.value })}
-                      className="w-full bg-slate-800 text-white text-sm px-4 py-2.5 rounded-xl border border-slate-700 focus:ring-2 focus:ring-indigo-500"
+                      className="w-full bg-elevated text-ink text-sm px-4 py-2.5 rounded-xl border border-line-strong focus:ring-2 focus:ring-accent"
                     />
                   </div>
 
                   <div>
-                    <label className="text-xs font-bold text-slate-400 mb-1 block">범주 설명</label>
+                    <label className="text-xs font-bold text-muted mb-1 block">범주 설명</label>
                     <textarea
                       rows={2}
                       placeholder="이 활동이 무엇인지 짧게 설명해 주세요."
                       value={editingCategory.description}
                       onChange={(e) => setEditingCategory({ ...editingCategory, description: e.target.value })}
-                      className="w-full bg-slate-800 text-white text-sm p-3 rounded-xl border border-slate-700"
+                      className="w-full bg-elevated text-ink text-sm p-3 rounded-xl border border-line-strong"
                     />
                   </div>
 
                   {/* 활동 기간 */}
-                  <div className="p-4 rounded-2xl bg-slate-800/50 border border-slate-800 space-y-3">
+                  <div className="p-4 rounded-2xl bg-elevated/50 border border-line space-y-3">
                     <div className="flex items-center gap-2">
                       <CalendarClock className="w-4 h-4 text-emerald-400" />
-                      <span className="text-xs font-bold text-slate-200">활동 운영 기간</span>
-                      <span className="text-[11px] text-slate-500">비워 두면 상시 운영으로 표시됩니다.</span>
+                      <span className="text-xs font-bold text-ink">활동 운영 기간</span>
+                      <span className="text-[11px] text-faint">비워 두면 상시 운영으로 표시됩니다.</span>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="text-[11px] font-bold text-slate-400 mb-1 block">시작일</label>
+                        <label className="text-[11px] font-bold text-muted mb-1 block">시작일</label>
                         <input
                           type="date"
                           value={editingCategory.startDate || ''}
                           onChange={(e) => setEditingCategory({ ...editingCategory, startDate: e.target.value })}
-                          className="w-full bg-slate-800 text-white text-xs px-3 py-2 rounded-xl border border-slate-700"
+                          className="w-full bg-elevated text-ink text-xs px-3 py-2 rounded-xl border border-line-strong"
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] font-bold text-slate-400 mb-1 block">종료일</label>
+                        <label className="text-[11px] font-bold text-muted mb-1 block">종료일</label>
                         <input
                           type="date"
                           value={editingCategory.endDate || ''}
                           onChange={(e) => setEditingCategory({ ...editingCategory, endDate: e.target.value })}
-                          className="w-full bg-slate-800 text-white text-xs px-3 py-2 rounded-xl border border-slate-700"
+                          className="w-full bg-elevated text-ink text-xs px-3 py-2 rounded-xl border border-line-strong"
                         />
                       </div>
                     </div>
@@ -708,7 +775,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       <button
                         type="button"
                         onClick={() => setEditingCategory({ ...editingCategory, startDate: '', endDate: '' })}
-                        className="text-[11px] font-bold text-slate-400 hover:text-white"
+                        className="text-[11px] font-bold text-muted hover:text-ink"
                       >
                         기간 지우고 상시 운영으로 되돌리기
                       </button>
@@ -716,7 +783,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </div>
 
                   <div>
-                    <label className="text-xs font-bold text-slate-400 mb-2 block">색상</label>
+                    <label className="text-xs font-bold text-muted mb-2 block">색상</label>
                     <div className="flex flex-wrap gap-2">
                       {Object.entries(CATEGORY_PALETTES).map(([key, p]) => (
                         <button
@@ -725,8 +792,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           onClick={() => setEditingCategory({ ...editingCategory, color: key })}
                           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition ${
                             editingCategory.color === key
-                              ? 'bg-slate-700 text-white border-slate-500 ring-2 ring-indigo-500'
-                              : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+                              ? 'bg-hover text-ink border-line-strong ring-2 ring-accent'
+                              : 'bg-elevated text-muted border-line-strong hover:text-ink'
                           }`}
                         >
                           <span className={`w-3 h-3 rounded-full ${p.dot}`} />
@@ -737,8 +804,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </div>
 
                   <div>
-                    <label className="text-xs font-bold text-slate-400 mb-2 block">아이콘</label>
-                    <div className="grid grid-cols-7 gap-2 max-h-36 overflow-y-auto p-2 bg-slate-800/50 rounded-2xl border border-slate-800">
+                    <label className="text-xs font-bold text-muted mb-2 block">아이콘</label>
+                    <div className="grid grid-cols-7 gap-2 max-h-36 overflow-y-auto p-2 bg-elevated/50 rounded-2xl border border-line">
                       {AVAILABLE_ICONS.map((iconName) => (
                         <button
                           key={iconName}
@@ -746,8 +813,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           onClick={() => setEditingCategory({ ...editingCategory, icon: iconName })}
                           className={`p-2.5 rounded-xl flex items-center justify-center transition ${
                             editingCategory.icon === iconName
-                              ? 'bg-indigo-600 text-white shadow ring-2 ring-indigo-400'
-                              : 'bg-slate-800 text-slate-400 hover:text-white'
+                              ? 'bg-accent text-white shadow ring-2 ring-indigo-400'
+                              : 'bg-elevated text-muted hover:text-ink'
                           }`}
                         >
                           <RoleIcon name={iconName} className="w-5 h-5" />
@@ -756,17 +823,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
+                  <div className="flex justify-end gap-3 pt-4 border-t border-line">
                     <button
                       type="button"
                       onClick={() => { setEditingCategory(null); setIsNewCategory(false); }}
-                      className="px-4 py-2 rounded-xl bg-slate-800 text-slate-400 text-xs font-bold"
+                      className="px-4 py-2 rounded-xl bg-elevated text-muted text-xs font-bold"
                     >
                       취소
                     </button>
                     <button
                       type="submit"
-                      className="px-6 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/30"
+                      className="px-6 py-2 rounded-xl bg-accent hover:bg-accent-soft text-white text-xs font-bold shadow-lg shadow-accent/30"
                     >
                       저장하기
                     </button>
@@ -783,8 +850,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h3 className="text-lg font-bold text-white">역할 관리 ({roles.length}종)</h3>
-              <p className="text-xs text-slate-400">활동 범주로 걸러 보고, 개별 수정·삭제하거나 여러 개를 선택해 한 번에 바꿀 수 있습니다.</p>
+              <h3 className="text-lg font-bold text-ink">역할 관리 ({roles.length}종)</h3>
+              <p className="text-xs text-muted">활동 범주로 걸러 보고, 개별 수정·삭제하거나 여러 개를 선택해 한 번에 바꿀 수 있습니다.</p>
             </div>
             <button
               onClick={() =>
@@ -799,19 +866,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   sopSteps: ['1단계 지침'],
                 })
               }
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-lg shadow-indigo-600/30 transition shrink-0"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-accent hover:bg-accent-soft text-white font-bold text-sm shadow-lg shadow-accent/30 transition shrink-0"
             >
               <Plus className="w-4 h-4" /> 새 역할 추가
             </button>
           </div>
 
           {/* 필터 바 */}
-          <div className="flex flex-col lg:flex-row lg:items-center gap-3 p-3 rounded-2xl bg-slate-800/40 border border-slate-800">
+          <div className="flex flex-col lg:flex-row lg:items-center gap-3 p-3 rounded-2xl bg-elevated/40 border border-line">
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0">
               <button
                 onClick={() => setRoleCategoryFilter('all')}
                 className={`px-3 py-1.5 text-xs font-bold rounded-lg whitespace-nowrap transition ${
-                  roleCategoryFilter === 'all' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-800 text-slate-400 hover:text-white'
+                  roleCategoryFilter === 'all' ? 'bg-accent text-white shadow' : 'bg-elevated text-muted hover:text-ink'
                 }`}
               >
                 전체 ({roles.length})
@@ -835,30 +902,30 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
 
             <div className="relative flex-1 min-w-[180px] lg:ml-auto">
-              <Search className="absolute left-3 top-2 w-3.5 h-3.5 text-slate-400" />
+              <Search className="absolute left-3 top-2 w-3.5 h-3.5 text-muted" />
               <input
                 type="text"
                 placeholder="역할 이름 · 설명 · 과목 검색..."
                 value={roleSearch}
                 onChange={(e) => setRoleSearch(e.target.value)}
-                className="w-full bg-slate-800 text-slate-100 text-xs pl-8 pr-3 py-1.5 rounded-lg border border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder-slate-500"
+                className="w-full bg-elevated text-ink text-xs pl-8 pr-3 py-1.5 rounded-lg border border-line-strong focus:outline-none focus:ring-2 focus:ring-accent placeholder-faint"
               />
             </div>
           </div>
 
           {/* 선택 & 일괄 수정 바 */}
-          <div className="flex flex-col xl:flex-row xl:items-center gap-3 p-3 rounded-2xl bg-slate-900 border border-slate-800">
+          <div className="flex flex-col xl:flex-row xl:items-center gap-3 p-3 rounded-2xl bg-surface border border-line">
             <button
               onClick={toggleSelectAllVisible}
               disabled={visibleRoles.length === 0}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-800 text-slate-300 hover:text-white border border-slate-700 disabled:opacity-40 transition shrink-0"
+              className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg bg-elevated text-muted hover:text-ink border border-line-strong disabled:opacity-40 transition shrink-0"
             >
-              {allVisibleSelected ? <CheckSquare className="w-4 h-4 text-indigo-400" /> : <Square className="w-4 h-4" />}
+              {allVisibleSelected ? <CheckSquare className="w-4 h-4 text-accent-text" /> : <Square className="w-4 h-4" />}
               {allVisibleSelected ? '전체 선택 해제' : `보이는 ${visibleRoles.length}종 전체 선택`}
             </button>
 
-            <span className="text-xs font-bold text-slate-400 shrink-0">
-              선택됨 <span className="text-indigo-300">{selectedVisible.length}</span>종
+            <span className="text-xs font-bold text-muted shrink-0">
+              선택됨 <span className="text-accent-text">{selectedVisible.length}</span>종
             </span>
 
             {selectedVisible.length > 0 ? (
@@ -866,7 +933,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <select
                   value={bulkCategory}
                   onChange={(e) => setBulkCategory(e.target.value)}
-                  className="bg-slate-800 text-slate-100 text-xs font-bold px-2.5 py-1.5 rounded-lg border border-slate-700 max-w-[180px]"
+                  className="bg-elevated text-ink text-xs font-bold px-2.5 py-1.5 rounded-lg border border-line-strong max-w-[180px]"
                 >
                   <option value="">활동 범주 변경 안 함</option>
                   {categories.map((c) => (
@@ -881,14 +948,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   placeholder="인원"
                   value={bulkCount}
                   onChange={(e) => setBulkCount(e.target.value)}
-                  className="w-20 bg-slate-800 text-slate-100 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700"
+                  className="w-20 bg-elevated text-ink text-xs px-2.5 py-1.5 rounded-lg border border-line-strong"
                   title="선택한 역할의 필요 인원을 일괄 설정"
                 />
 
                 <select
                   value={bulkIcon}
                   onChange={(e) => setBulkIcon(e.target.value)}
-                  className="bg-slate-800 text-slate-100 text-xs font-bold px-2.5 py-1.5 rounded-lg border border-slate-700"
+                  className="bg-elevated text-ink text-xs font-bold px-2.5 py-1.5 rounded-lg border border-line-strong"
                 >
                   <option value="">아이콘 변경 안 함</option>
                   {AVAILABLE_ICONS.map((i) => (
@@ -912,13 +979,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                 <button
                   onClick={() => setSelectedRoleIds([])}
-                  className="px-2 py-1.5 text-xs font-bold text-slate-400 hover:text-white"
+                  className="px-2 py-1.5 text-xs font-bold text-muted hover:text-ink"
                 >
                   선택 해제
                 </button>
               </div>
             ) : (
-              <span className="text-[11px] text-slate-500 xl:ml-auto">
+              <span className="text-[11px] text-faint xl:ml-auto">
                 역할을 선택하면 활동 범주 · 필요 인원 · 아이콘을 한 번에 바꿀 수 있습니다.
               </span>
             )}
@@ -936,50 +1003,50 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <div
                     key={role.id}
                     className={`flex items-center gap-3 p-3 rounded-2xl border transition ${
-                      isSelected ? 'bg-indigo-950/40 border-indigo-500/50' : 'bg-slate-900 border-slate-800 hover:border-slate-700'
+                      isSelected ? 'bg-accent-soft/10 border-accent-soft/50' : 'bg-surface border-line hover:border-line-strong'
                     }`}
                   >
                     <button
                       onClick={() => toggleSelectRole(role.id)}
                       aria-pressed={isSelected}
-                      className="p-1 shrink-0 text-slate-500 hover:text-indigo-300 transition"
+                      className="p-1 shrink-0 text-faint hover:text-accent-text transition"
                       title="이 역할 선택"
                     >
-                      {isSelected ? <CheckSquare className="w-5 h-5 text-indigo-400" /> : <Square className="w-5 h-5" />}
+                      {isSelected ? <CheckSquare className="w-5 h-5 text-accent-text" /> : <Square className="w-5 h-5" />}
                     </button>
 
-                    <span className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shrink-0">
+                    <span className="p-2 rounded-xl bg-accent-soft/10 text-accent-text border border-accent-soft/20 shrink-0">
                       <RoleIcon name={role.icon} className="w-4 h-4" />
                     </span>
 
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h4 className="font-bold text-white text-sm truncate">{role.title}</h4>
+                        <h4 className="font-bold text-ink text-sm truncate">{role.title}</h4>
                         <span className={`text-[11px] font-bold px-2 py-0.5 rounded-lg border ${palette.badge}`}>
                           {cat?.name || '미분류 범주'}
                         </span>
                         {role.subjectName && (
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-slate-800 text-slate-400 border border-slate-700">
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-elevated text-muted border border-line-strong">
                             {role.subjectName}
                           </span>
                         )}
-                        <span className="text-[11px] font-bold text-slate-500">{role.count}명</span>
+                        <span className="text-[11px] font-bold text-faint">{role.count}명</span>
                       </div>
-                      <p className="text-xs text-slate-400 truncate mt-0.5">{role.description || '설명 없음'}</p>
+                      <p className="text-xs text-muted truncate mt-0.5">{role.description || '설명 없음'}</p>
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
                       <button
                         onClick={() => setEditingRole(role)}
                         title="개별 수정"
-                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                        className="p-2 rounded-lg text-muted hover:text-ink hover:bg-elevated transition"
                       >
                         <Edit className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => handleDeleteRole(role.id)}
                         title="개별 삭제"
-                        className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition"
+                        className="p-2 rounded-lg text-muted hover:text-rose-400 hover:bg-rose-500/10 transition"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -989,7 +1056,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               })}
             </div>
           ) : (
-            <div className="text-center py-16 bg-slate-900/60 rounded-3xl border border-slate-800 text-slate-400 text-sm">
+            <div className="text-center py-16 bg-surface/60 rounded-3xl border border-line text-muted text-sm">
               {roles.length === 0
                 ? '등록된 역할이 없습니다. [새 역할 추가] 또는 [템플릿 생성기]에서 시작해 보세요.'
                 : '조건에 맞는 역할이 없습니다. 필터나 검색어를 확인해 주세요.'}
@@ -998,13 +1065,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
           {/* Edit Role Modal */}
           {editingRole && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-pop">
-              <div className="w-full max-w-xl bg-slate-900 border border-slate-700 rounded-3xl p-6 sm:p-8 space-y-6 max-h-[90vh] overflow-y-auto">
-                <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-                  <h3 className="text-xl font-bold text-white">
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim/70 backdrop-blur-md animate-pop">
+              <div className="w-full max-w-xl bg-surface border border-line-strong rounded-3xl p-6 sm:p-8 space-y-6 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between pb-4 border-b border-line">
+                  <h3 className="text-xl font-bold text-ink">
                     {editingRole.id ? '역할 수정' : '새 역할 작성'}
                   </h3>
-                  <button onClick={() => setEditingRole(null)} className="p-2 text-slate-400 hover:text-white">
+                  <button onClick={() => setEditingRole(null)} className="p-2 text-muted hover:text-ink">
                     <X className="w-5 h-5" />
                   </button>
                 </div>
@@ -1013,11 +1080,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="text-xs font-bold text-slate-400 mb-1 block">활동 범주 (Category)</label>
+                      <label className="text-xs font-bold text-muted mb-1 block">활동 범주 (Category)</label>
                       <select
                         value={editingRole.activityCategory || fallbackCategoryId}
                         onChange={(e) => setEditingRole({ ...editingRole, activityCategory: e.target.value })}
-                        className="w-full bg-slate-800 text-white text-xs px-3.5 py-2.5 rounded-xl border border-slate-700"
+                        className="w-full bg-elevated text-ink text-xs px-3.5 py-2.5 rounded-xl border border-line-strong"
                       >
                         {categories.map((cat) => (
                           <option key={cat.id} value={cat.id}>{cat.name}</option>
@@ -1026,45 +1093,45 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </div>
 
                     <div>
-                      <label className="text-xs font-bold text-slate-400 mb-1 block">과목명 (선택: 과목별 역할 시)</label>
+                      <label className="text-xs font-bold text-muted mb-1 block">과목명 (선택: 과목별 역할 시)</label>
                       <input
                         type="text"
                         placeholder="예: 수학, 과학, 국어"
                         value={editingRole.subjectName || ''}
                         onChange={(e) => setEditingRole({ ...editingRole, subjectName: e.target.value })}
-                        className="w-full bg-slate-800 text-white text-xs px-3.5 py-2.5 rounded-xl border border-slate-700"
+                        className="w-full bg-elevated text-ink text-xs px-3.5 py-2.5 rounded-xl border border-line-strong"
                       />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="text-xs font-bold text-slate-400 mb-1 block">역할 이름</label>
+                      <label className="text-xs font-bold text-muted mb-1 block">역할 이름</label>
                       <input
                         type="text"
                         required
                         placeholder="예: 칠판 도우미"
                         value={editingRole.title || ''}
                         onChange={(e) => setEditingRole({ ...editingRole, title: e.target.value })}
-                        className="w-full bg-slate-800 text-white text-sm px-4 py-2 rounded-xl border border-slate-700"
+                        className="w-full bg-elevated text-ink text-sm px-4 py-2 rounded-xl border border-line-strong"
                       />
                     </div>
                     <div>
-                      <label className="text-xs font-bold text-slate-400 mb-1 block">필요 인원 (명)</label>
+                      <label className="text-xs font-bold text-muted mb-1 block">필요 인원 (명)</label>
                       <input
                         type="number"
                         min={1}
                         max={40}
                         value={editingRole.count || 1}
                         onChange={(e) => setEditingRole({ ...editingRole, count: parseInt(e.target.value) || 1 })}
-                        className="w-full bg-slate-800 text-white text-sm px-4 py-2 rounded-xl border border-slate-700"
+                        className="w-full bg-elevated text-ink text-sm px-4 py-2 rounded-xl border border-line-strong"
                       />
                     </div>
                   </div>
 
                   <div>
-                    <label className="text-xs font-bold text-slate-400 mb-2 block">아이콘 선택</label>
-                    <div className="grid grid-cols-7 gap-2 max-h-36 overflow-y-auto p-2 bg-slate-800/50 rounded-2xl border border-slate-800">
+                    <label className="text-xs font-bold text-muted mb-2 block">아이콘 선택</label>
+                    <div className="grid grid-cols-7 gap-2 max-h-36 overflow-y-auto p-2 bg-elevated/50 rounded-2xl border border-line">
                       {AVAILABLE_ICONS.map((iconName) => (
                         <button
                           key={iconName}
@@ -1072,8 +1139,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           onClick={() => setEditingRole({ ...editingRole, icon: iconName })}
                           className={`p-2.5 rounded-xl flex items-center justify-center transition ${
                             editingRole.icon === iconName
-                              ? 'bg-indigo-600 text-white shadow ring-2 ring-indigo-400'
-                              : 'bg-slate-800 text-slate-400 hover:text-white'
+                              ? 'bg-accent text-white shadow ring-2 ring-indigo-400'
+                              : 'bg-elevated text-muted hover:text-ink'
                           }`}
                         >
                           <RoleIcon name={iconName} className="w-5 h-5" />
@@ -1083,18 +1150,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </div>
 
                   <div>
-                    <label className="text-xs font-bold text-slate-400 mb-1 block">역할 설명</label>
+                    <label className="text-xs font-bold text-muted mb-1 block">역할 설명</label>
                     <textarea
                       rows={2}
                       placeholder="역할의 임무를 설명하세요."
                       value={editingRole.description || ''}
                       onChange={(e) => setEditingRole({ ...editingRole, description: e.target.value })}
-                      className="w-full bg-slate-800 text-white text-sm p-3 rounded-xl border border-slate-700"
+                      className="w-full bg-elevated text-ink text-sm p-3 rounded-xl border border-line-strong"
                     />
                   </div>
 
                   <div>
-                    <label className="text-xs font-bold text-slate-400 mb-1 block">
+                    <label className="text-xs font-bold text-muted mb-1 block">
                       역할 수행 지침 (SOP) — 한 줄에 한 단계씩
                     </label>
                     <textarea
@@ -1107,21 +1174,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           sopSteps: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean),
                         })
                       }
-                      className="w-full bg-slate-800 text-white text-xs p-3 rounded-xl border border-slate-700"
+                      className="w-full bg-elevated text-ink text-xs p-3 rounded-xl border border-line-strong"
                     />
                   </div>
 
-                  <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
+                  <div className="flex justify-end gap-3 pt-4 border-t border-line">
                     <button
                       type="button"
                       onClick={() => setEditingRole(null)}
-                      className="px-4 py-2 rounded-xl bg-slate-800 text-slate-400 text-xs font-bold"
+                      className="px-4 py-2 rounded-xl bg-elevated text-muted text-xs font-bold"
                     >
                       취소
                     </button>
                     <button
                       type="submit"
-                      className="px-6 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/30"
+                      className="px-6 py-2 rounded-xl bg-accent hover:bg-accent-soft text-white text-xs font-bold shadow-lg shadow-accent/30"
                     >
                       저장하기
                     </button>
@@ -1138,8 +1205,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h3 className="text-lg font-bold text-white">학급 &amp; 과목별 역할 템플릿 보관함</h3>
-              <p className="text-xs text-slate-400">
+              <h3 className="text-lg font-bold text-ink">학급 &amp; 과목별 역할 템플릿 보관함</h3>
+              <p className="text-xs text-muted">
                 내가 만든 템플릿은 언제든 수정·삭제할 수 있고, 기본 제공 템플릿은 복제해서 내 템플릿으로 고칠 수 있습니다.
               </p>
             </div>
@@ -1156,24 +1223,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             {allPresets.map((preset) => {
               const targetCat = categories.find((c) => c.id === preset.activityCategory);
               return (
-                <div key={preset.id} className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-4 relative">
+                <div key={preset.id} className="p-6 rounded-3xl bg-surface border border-line shadow-xl space-y-4 relative">
                   <span className={`absolute top-4 right-4 text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                     preset.isCustom
                       ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                      : 'bg-slate-800 text-slate-400 border-slate-700'
+                      : 'bg-elevated text-muted border-line-strong'
                   }`}>
                     {preset.isCustom ? '내 템플릿' : '기본 제공'}
                   </span>
 
                   <div className="pr-24">
-                    <h4 className="text-xl font-bold text-white">{preset.name}</h4>
+                    <h4 className="text-xl font-bold text-ink">{preset.name}</h4>
                     <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                      <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300">
+                      <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-accent-soft/20 text-accent-text">
                         {preset.targetCount}
                       </span>
                       <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full border ${
                         targetCat
-                          ? 'bg-slate-800 text-slate-300 border-slate-700'
+                          ? 'bg-elevated text-muted border-line-strong'
                           : 'bg-rose-500/15 text-rose-300 border-rose-500/40'
                       }`}>
                         {targetCat ? `적용 대상: ${targetCat.name}` : '⚠ 없는 활동 범주'}
@@ -1181,15 +1248,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </div>
                   </div>
 
-                  <p className="text-xs text-slate-300">{preset.description}</p>
+                  <p className="text-xs text-muted">{preset.description}</p>
 
-                  <div className="pt-3 border-t border-slate-800">
-                    <span className="text-xs font-bold text-slate-400 block mb-2">포함 역할 ({preset.roles.length}종):</span>
+                  <div className="pt-3 border-t border-line">
+                    <span className="text-xs font-bold text-muted block mb-2">포함 역할 ({preset.roles.length}종):</span>
                     <div className="flex flex-wrap gap-1.5 mb-4">
                       {preset.roles.map((r, i) => (
-                        <span key={i} className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 border border-slate-700">
+                        <span key={i} className="text-[11px] px-2.5 py-1 rounded-lg bg-elevated text-muted border border-line-strong">
                           {r.title}
-                          {r.count > 1 && <b className="text-slate-500"> ×{r.count}</b>}
+                          {r.count > 1 && <b className="text-faint"> ×{r.count}</b>}
                         </span>
                       ))}
                     </div>
@@ -1202,13 +1269,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                               soundFx.playClick();
                               onOpenPresetModal(preset);
                             }}
-                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 transition"
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-elevated hover:bg-hover text-ink font-bold text-xs border border-line-strong transition"
                           >
                             <Edit className="w-3.5 h-3.5" /> 템플릿 수정
                           </button>
                           <button
                             onClick={() => handleDuplicatePreset(preset)}
-                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 transition"
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-elevated hover:bg-hover text-muted font-bold text-xs border border-line-strong transition"
                           >
                             <Copy className="w-3.5 h-3.5" /> 복제
                           </button>
@@ -1222,7 +1289,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       ) : (
                         <button
                           onClick={() => handleDuplicatePreset(preset)}
-                          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 transition"
+                          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-elevated hover:bg-hover text-ink font-bold text-xs border border-line-strong transition"
                           title="기본 템플릿은 직접 수정할 수 없으므로 복제본을 만들어 편집합니다."
                         >
                           <Copy className="w-3.5 h-3.5" /> 복제해서 수정
@@ -1231,7 +1298,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                       <button
                         onClick={() => handleLoadPreset(preset)}
-                        className="ml-auto flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 transition"
+                        className="ml-auto flex items-center gap-1.5 px-4 py-2 rounded-xl bg-accent hover:bg-accent-soft text-white font-bold text-xs shadow-lg shadow-accent/30 transition"
                       >
                         <BookOpen className="w-4 h-4" /> 적용하기
                       </button>
@@ -1246,21 +1313,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
       {/* ══ TAB 5: 클라우드 Sync ═══════════════════════════════════ */}
       {activeTab === 'cloud' && (
-        <div className="p-6 sm:p-8 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-6">
+        <div className="p-6 sm:p-8 rounded-3xl bg-surface border border-line shadow-xl space-y-6">
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-4">
-              <div className="p-3.5 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+              <div className="p-3.5 rounded-2xl bg-accent-soft/10 text-accent-text border border-accent-soft/20">
                 <Cloud className="w-8 h-8" />
               </div>
               <div>
-                <h3 className="text-xl font-bold text-white">🔥 Firebase 클라우드 대시보드</h3>
-                <p className="text-xs text-slate-400">실시간 다중 디바이스 동기화 및 클라우드 연동 상태</p>
+                <h3 className="text-xl font-bold text-ink">🔥 Firebase 클라우드 대시보드</h3>
+                <p className="text-xs text-muted">실시간 다중 디바이스 동기화 및 클라우드 연동 상태</p>
               </div>
             </div>
 
             <button
               onClick={onOpenFirebaseModal}
-              className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 transition"
+              className="px-5 py-2.5 rounded-xl bg-accent hover:bg-accent-soft text-white font-bold text-xs shadow-lg shadow-accent/30 transition"
             >
               Firebase 연결 정보 설정하기
             </button>
@@ -1300,15 +1367,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           )}
 
-          <div className="p-4 rounded-2xl bg-slate-800/60 border border-slate-800 space-y-3">
+          <div className="p-4 rounded-2xl bg-elevated/60 border border-line space-y-3">
             <div className="flex items-center justify-between text-xs gap-3">
-              <span className="font-bold text-slate-400">현재 연동 상태:</span>
+              <span className="font-bold text-muted">현재 연동 상태:</span>
               <span className={`font-bold px-2.5 py-1 rounded-full text-right ${
                 syncState === 'idle' || syncState === 'saving'
                   ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                   : syncState === 'needs-login' || syncState === 'error'
                     ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                    : 'bg-slate-800 text-slate-400'
+                    : 'bg-elevated text-muted'
               }`}>
                 {syncState === 'off' && '💾 로컬 전용 (이 기기에만 저장)'}
                 {syncState === 'needs-login' && '🔒 로그인 필요 — 저장되지 않음'}
@@ -1319,20 +1386,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
 
             <div className="flex items-center justify-between text-xs gap-3">
-              <span className="font-bold text-slate-400">로그인 계정:</span>
-              <span className="font-mono text-indigo-300 truncate">
+              <span className="font-bold text-muted">로그인 계정:</span>
+              <span className="font-mono text-accent-text truncate">
                 {userProfile?.email || userProfile?.displayName || '로그인하지 않음'}
               </span>
             </div>
 
             <div className="flex items-center justify-between text-xs gap-3">
-              <span className="font-bold text-slate-400">학급 고유 ID (Classroom ID):</span>
-              <span className="font-mono text-indigo-300">{firebaseConfig.classroomId || '미지정'}</span>
+              <span className="font-bold text-muted">학급 고유 ID (Classroom ID):</span>
+              <span className="font-mono text-accent-text">{firebaseConfig.classroomId || '미지정'}</span>
             </div>
 
             <div className="flex items-center justify-between text-xs gap-3">
-              <span className="font-bold text-slate-400">Firebase 프로젝트:</span>
-              <span className="font-mono text-indigo-300 truncate">{firebaseConfig.projectId || '미지정'}</span>
+              <span className="font-bold text-muted">Firebase 프로젝트:</span>
+              <span className="font-mono text-accent-text truncate">{firebaseConfig.projectId || '미지정'}</span>
             </div>
           </div>
         </div>
@@ -1341,16 +1408,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* ══ TAB 6: 백업 ═══════════════════════════════════════════ */}
       {activeTab === 'backup' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">
+          <div className="p-6 rounded-3xl bg-surface border border-line shadow-xl space-y-4">
             <div className="flex items-center gap-3">
               <div className="p-3 rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                 <Download className="w-6 h-6" />
               </div>
               <div>
-                <h4 className="text-lg font-bold text-white">통합 JSON 데이터 백업 다운로드</h4>
-                <p className="text-xs text-slate-400">
+                <h4 className="text-lg font-bold text-ink">통합 JSON 데이터 백업 다운로드</h4>
+                <p className="text-xs text-muted">
                   학생 명단, 활동 범주와 기간, 역할 목록, 커스텀 템플릿, 활동별 체크 이력, 역할 배정 이력을 JSON 파일로 보관합니다.
-                  <span className="block mt-1 text-slate-500">보안을 위해 Firebase 접속 정보는 백업에 포함되지 않습니다.</span>
+                  <span className="block mt-1 text-faint">보안을 위해 Firebase 접속 정보는 백업에 포함되지 않습니다.</span>
                 </p>
               </div>
             </div>
@@ -1362,18 +1429,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </button>
           </div>
 
-          <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">
+          <div className="p-6 rounded-3xl bg-surface border border-line shadow-xl space-y-4">
             <div className="flex items-center gap-3">
-              <div className="p-3 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+              <div className="p-3 rounded-2xl bg-accent-soft/10 text-accent-text border border-accent-soft/20">
                 <Upload className="w-6 h-6" />
               </div>
               <div>
-                <h4 className="text-lg font-bold text-white">JSON 백업 파일 복원</h4>
-                <p className="text-xs text-slate-400">이전에 저장한 JSON 파일에서 학급 데이터 전체를 완벽 복원합니다.</p>
+                <h4 className="text-lg font-bold text-ink">JSON 백업 파일 복원</h4>
+                <p className="text-xs text-muted">이전에 저장한 JSON 파일에서 학급 데이터 전체를 완벽 복원합니다.</p>
               </div>
             </div>
 
-            <label className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-indigo-200 font-bold text-sm border border-slate-700 cursor-pointer transition">
+            <label className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-elevated hover:bg-hover text-accent-text font-bold text-sm border border-line-strong cursor-pointer transition">
               <Upload className="w-4 h-4" /> 백업 파일 선택 및 데이터 복원
               <input type="file" accept=".json" onChange={handleImportFile} className="hidden" />
             </label>

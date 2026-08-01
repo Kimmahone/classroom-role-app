@@ -102,25 +102,25 @@ export const StatsView: React.FC<StatsViewProps> = ({
     <div className="space-y-8 animate-pop">
       
       {/* Banner */}
-      <div className="p-6 sm:p-8 rounded-3xl glass-panel border border-slate-700/60 shadow-xl">
+      <div className="p-6 sm:p-8 rounded-3xl glass-panel border border-line-strong/60 shadow-xl">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <span className="p-2.5 rounded-2xl bg-indigo-500/20 text-indigo-400">
+            <span className="p-2.5 rounded-2xl bg-accent-soft/20 text-accent-text">
               <BarChart3 className="w-6 h-6" />
             </span>
             <div>
-              <h2 className="text-2xl font-extrabold text-white">📊 올인원 학급 역할 & 활동 참여 통계</h2>
-              <p className="text-sm text-slate-400">1인 1역, 아침활동, 과목별 역할, 프로젝트 학습 성실도를 한눈에 다각도 분석합니다.</p>
+              <h2 className="text-2xl font-extrabold text-ink">📊 올인원 학급 역할 & 활동 참여 통계</h2>
+              <p className="text-sm text-muted">1인 1역, 아침활동, 과목별 역할, 프로젝트 학습 성실도를 한눈에 다각도 분석합니다.</p>
             </div>
           </div>
 
           {/* Filter dropdown */}
           <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-slate-400" />
+            <Filter className="w-4 h-4 text-muted" />
             <select
               value={selectedCategoryFilter}
               onChange={(e) => setSelectedCategoryFilter(e.target.value)}
-              className="bg-slate-800 text-white font-bold text-xs px-3.5 py-2 rounded-xl border border-slate-700 focus:ring-2 focus:ring-indigo-500"
+              className="bg-elevated text-ink font-bold text-xs px-3.5 py-2 rounded-xl border border-line-strong focus:ring-2 focus:ring-accent"
             >
               <option value="all">전체 활동 범주 통합</option>
               {categories.map((cat) => (
@@ -132,8 +132,8 @@ export const StatsView: React.FC<StatsViewProps> = ({
       </div>
 
       {/* 활동 범주별 운영 기간 요약 */}
-      <div className="p-5 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-3">
-        <h3 className="text-sm font-bold text-white flex items-center gap-2">
+      <div className="p-5 rounded-3xl bg-surface border border-line shadow-xl space-y-3">
+        <h3 className="text-sm font-bold text-ink flex items-center gap-2">
           <Calendar className="w-4 h-4 text-emerald-400" />
           활동 범주별 운영 기간
         </h3>
@@ -158,8 +158,8 @@ export const StatsView: React.FC<StatsViewProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
         {/* Top 5 Contributors */}
-        <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+        <div className="p-6 rounded-3xl bg-surface border border-line shadow-xl space-y-4">
+          <h3 className="text-lg font-bold text-ink flex items-center gap-2">
             <Award className="w-5 h-5 text-amber-400" />
             성실왕 학생 랭킹 TOP 5
           </h3>
@@ -168,19 +168,19 @@ export const StatsView: React.FC<StatsViewProps> = ({
             {studentStats.slice(0, 5).map((st, idx) => (
               <div
                 key={st.student.id}
-                className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-800/60 border border-slate-800"
+                className="flex items-center justify-between p-3.5 rounded-2xl bg-elevated/60 border border-line"
               >
                 <div className="flex items-center gap-3">
                   <span className={`flex items-center justify-center w-7 h-7 rounded-full text-xs font-black ${
                     idx === 0 ? 'bg-amber-400 text-slate-950' :
                     idx === 1 ? 'bg-slate-300 text-slate-950' :
-                    idx === 2 ? 'bg-amber-700 text-white' : 'bg-slate-800 text-slate-400'
+                    idx === 2 ? 'bg-amber-700 text-white' : 'bg-elevated text-muted'
                   }`}>
                     {idx + 1}
                   </span>
                   <div>
-                    <span className="font-bold text-white text-sm">{st.student.name}</span>
-                    <span className="text-xs text-slate-400 block">{st.student.number}번</span>
+                    <span className="font-bold text-ink text-sm">{st.student.name}</span>
+                    <span className="text-xs text-muted block">{st.student.number}번</span>
                   </div>
                 </div>
 
@@ -194,12 +194,12 @@ export const StatsView: React.FC<StatsViewProps> = ({
         </div>
 
         {/* Full Table */}
-        <div className="lg:col-span-2 p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl">
-          <h3 className="text-lg font-bold text-white mb-4">전체 학생 성실도 및 이력 분석</h3>
+        <div className="lg:col-span-2 p-6 rounded-3xl bg-surface border border-line shadow-xl">
+          <h3 className="text-lg font-bold text-ink mb-4">전체 학생 성실도 및 이력 분석</h3>
           
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-800/80 text-slate-400 uppercase font-bold border-b border-slate-700">
+            <table className="w-full text-left text-xs text-muted">
+              <thead className="bg-elevated/80 text-muted uppercase font-bold border-b border-line-strong">
                 <tr>
                   <th className="p-3">번호</th>
                   <th className="p-3">이름</th>
@@ -208,11 +208,11 @@ export const StatsView: React.FC<StatsViewProps> = ({
                   <th className="p-3 text-right">누적 수행 횟수</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800">
+              <tbody className="divide-y divide-line">
                 {studentStats.map((st) => (
-                  <tr key={st.student.id} className="hover:bg-slate-800/40 transition">
-                    <td className="p-3 font-semibold text-slate-500">{st.student.number}번</td>
-                    <td className="p-3 font-bold text-white">{st.student.name}</td>
+                  <tr key={st.student.id} className="hover:bg-elevated/40 transition">
+                    <td className="p-3 font-semibold text-faint">{st.student.number}번</td>
+                    <td className="p-3 font-bold text-ink">{st.student.name}</td>
                     <td className="p-3">
                       <div className="flex flex-wrap gap-1">
                         {st.currentAssignments.length > 0 ? (
@@ -220,14 +220,14 @@ export const StatsView: React.FC<StatsViewProps> = ({
                             const r = roleMap.get(a.roleId);
                             if (!r) return null;
                             return (
-                              <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-[11px]">
+                              <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-accent-soft/10 text-accent-text border border-accent-soft/20 text-[11px]">
                                 <RoleIcon name={r.icon} className="w-3 h-3" />
                                 <span>{r.title}</span>
                               </span>
                             );
                           })
                         ) : (
-                          <span className="text-slate-500">미배정</span>
+                          <span className="text-faint">미배정</span>
                         )}
                       </div>
                     </td>
@@ -237,18 +237,18 @@ export const StatsView: React.FC<StatsViewProps> = ({
                           {st.experiencedRoles.slice(0, 4).map(([title, count]) => (
                             <span
                               key={title}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 text-[11px]"
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-elevated text-muted border border-line-strong text-[11px]"
                             >
                               {title}
-                              <b className={count > 1 ? 'text-amber-300' : 'text-slate-500'}>×{count}</b>
+                              <b className={count > 1 ? 'text-amber-300' : 'text-faint'}>×{count}</b>
                             </span>
                           ))}
                           {st.experiencedRoles.length > 4 && (
-                            <span className="text-[11px] text-slate-500 px-1">+{st.experiencedRoles.length - 4}종</span>
+                            <span className="text-[11px] text-faint px-1">+{st.experiencedRoles.length - 4}종</span>
                           )}
                         </div>
                       ) : (
-                        <span className="text-slate-500 text-[11px]">이력 없음</span>
+                        <span className="text-faint text-[11px]">이력 없음</span>
                       )}
                     </td>
                     <td className="p-3 text-right font-black text-emerald-400 text-sm">
@@ -264,13 +264,13 @@ export const StatsView: React.FC<StatsViewProps> = ({
       </div>
 
       {/* 역할 순환 공정성 */}
-      <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">
+      <div className="p-6 rounded-3xl bg-surface border border-line shadow-xl space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+          <h3 className="text-lg font-bold text-ink flex items-center gap-2">
             <Scale className="w-5 h-5 text-emerald-400" />
             역할별 순환 현황 (누적 {assignmentRounds.length}회차 배정)
           </h3>
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-muted">
             같은 학생이 특정 역할에 몰려 있지 않은지 확인하세요.
           </span>
         </div>
@@ -284,13 +284,13 @@ export const StatsView: React.FC<StatsViewProps> = ({
               const isSkewed = perStudent.length > 1 && maxCount / entry.total >= 0.5;
 
               return (
-                <div key={entry.title} className="p-4 rounded-2xl bg-slate-800/50 border border-slate-800 space-y-2">
+                <div key={entry.title} className="p-4 rounded-2xl bg-elevated/50 border border-line space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <h4 className="font-bold text-white text-sm truncate">{entry.title}</h4>
+                    <h4 className="font-bold text-ink text-sm truncate">{entry.title}</h4>
                     <span className={`text-[11px] font-bold px-2 py-0.5 rounded-lg shrink-0 ${
                       isSkewed
                         ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                        : 'bg-slate-800 text-slate-400 border border-slate-700'
+                        : 'bg-elevated text-muted border border-line-strong'
                     }`}>
                       {isSkewed ? '편중 주의' : `${perStudent.length}명 순환`}
                     </span>
@@ -299,14 +299,14 @@ export const StatsView: React.FC<StatsViewProps> = ({
                     {perStudent.slice(0, 8).map(([name, count]) => (
                       <span
                         key={name}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-900 text-slate-300 border border-slate-700 text-[11px]"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-surface text-muted border border-line-strong text-[11px]"
                       >
                         {name}
-                        <b className={count > 1 ? 'text-amber-300' : 'text-slate-500'}>×{count}</b>
+                        <b className={count > 1 ? 'text-amber-300' : 'text-faint'}>×{count}</b>
                       </span>
                     ))}
                     {perStudent.length > 8 && (
-                      <span className="text-[11px] text-slate-500 px-1">+{perStudent.length - 8}명</span>
+                      <span className="text-[11px] text-faint px-1">+{perStudent.length - 8}명</span>
                     )}
                   </div>
                 </div>
@@ -314,7 +314,7 @@ export const StatsView: React.FC<StatsViewProps> = ({
             })}
           </div>
         ) : (
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-faint">
             아직 저장된 역할 배정 이력이 없습니다. [역할 배정] 화면에서 배정을 실행하면 회차별로 자동 기록됩니다.
           </p>
         )}
@@ -322,14 +322,14 @@ export const StatsView: React.FC<StatsViewProps> = ({
 
       {/* 배정 회차 기록 */}
       {assignmentRounds.length > 0 && (
-        <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+        <div className="p-6 rounded-3xl bg-surface border border-line shadow-xl space-y-4">
+          <h3 className="text-lg font-bold text-ink flex items-center gap-2">
             <History className="w-5 h-5 text-amber-400" />
             역할 배정 회차 기록 ({assignmentRounds.length}회)
           </h3>
           <div className="flex flex-wrap gap-2">
             {assignmentRounds.slice(0, 40).map((d) => (
-              <span key={d} className="px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-slate-200">
+              <span key={d} className="px-3 py-1.5 rounded-xl bg-elevated border border-line-strong text-xs font-bold text-ink">
                 {d}
               </span>
             ))}
@@ -338,22 +338,22 @@ export const StatsView: React.FC<StatsViewProps> = ({
       )}
 
       {/* History Log Dates */}
-      <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">
-        <h3 className="text-lg font-bold text-white flex items-center gap-2">
-          <Calendar className="w-5 h-5 text-indigo-400" />
+      <div className="p-6 rounded-3xl bg-surface border border-line shadow-xl space-y-4">
+        <h3 className="text-lg font-bold text-ink flex items-center gap-2">
+          <Calendar className="w-5 h-5 text-accent-text" />
           활동 수행 기록 일자 ({dates.length}일 기록됨)
         </h3>
 
         {dates.length > 0 ? (
           <div className="flex flex-wrap gap-2">
             {dates.map((dKey) => (
-              <div key={dKey} className="px-4 py-2 rounded-2xl bg-slate-800 border border-slate-700 text-xs">
-                <span className="font-bold text-slate-200">{dKey}</span>
+              <div key={dKey} className="px-4 py-2 rounded-2xl bg-elevated border border-line-strong text-xs">
+                <span className="font-bold text-ink">{dKey}</span>
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-xs text-slate-500">아직 누적된 일일 기록이 없습니다. 현황판에서 완수를 체크하세요.</p>
+          <p className="text-xs text-faint">아직 누적된 일일 기록이 없습니다. 현황판에서 완수를 체크하세요.</p>
         )}
       </div>
 

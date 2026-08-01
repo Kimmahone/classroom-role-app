@@ -79,7 +79,7 @@ export const getPeriodInfo = (
 
 /** 기간 상태별 배지 색상 */
 export const PERIOD_BADGE_CLASS: Record<PeriodStatus, string> = {
-  always: 'bg-slate-800 text-slate-400 border-slate-700',
+  always: 'bg-elevated text-muted border-line-strong',
   upcoming: 'bg-sky-500/15 text-sky-300 border-sky-500/40',
   active: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
   ended: 'bg-rose-500/15 text-rose-300 border-rose-500/40',

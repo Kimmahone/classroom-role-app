@@ -158,18 +158,18 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
     <div className="space-y-8 animate-pop">
       
       {/* Control Deck */}
-      <div className="p-6 sm:p-8 rounded-3xl glass-panel border border-slate-700/60 shadow-2xl">
+      <div className="p-6 sm:p-8 rounded-3xl glass-panel border border-line-strong/60 shadow-2xl">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <span className="p-2 rounded-xl bg-indigo-500/20 text-indigo-400">
+              <span className="p-2 rounded-xl bg-accent-soft/20 text-accent-text">
                 <Shuffle className="w-5 h-5" />
               </span>
-              <h2 className="text-2xl font-extrabold text-white">
+              <h2 className="text-2xl font-extrabold text-ink">
                 🎲 [{categoryConfig.name}] 역할 배정 & 셔플 Engine
               </h2>
             </div>
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-muted">
               선택된 범주의 역할({categoryRoles.length}종)에 맞추어 랜덤 셔플 및 순환 배정을 진행합니다.
             </p>
 
@@ -192,7 +192,7 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
               className={`mt-3 inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold border transition ${
                 useFairMode
                   ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
-                  : 'bg-slate-800 text-slate-400 border-slate-700'
+                  : 'bg-elevated text-muted border-line-strong'
               }`}
               title="지난 배정 이력을 반영해 같은 역할이 반복되지 않도록 합니다."
             >
@@ -203,7 +203,7 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
               </span>
             </button>
             {useFairMode && sessionCount === 0 && (
-              <p className="text-[11px] text-slate-500 mt-1.5">
+              <p className="text-[11px] text-faint mt-1.5">
                 아직 저장된 배정 이력이 없습니다. 첫 배정을 실행하면 다음 회차부터 반복을 피해 배정합니다.
               </p>
             )}
@@ -213,7 +213,7 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
             <button
               onClick={handleRandomShuffle}
               disabled={isShuffling || categoryRoles.length === 0}
-              className={`flex items-center gap-2 px-5 py-3 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-sm shadow-lg shadow-indigo-600/30 transition transform hover:-translate-y-0.5 ${
+              className={`flex items-center gap-2 px-5 py-3 rounded-2xl bg-gradient-to-r from-accent to-purple-600 hover:from-accent-soft hover:to-purple-500 text-white font-bold text-sm shadow-lg shadow-accent/30 transition transform hover:-translate-y-0.5 ${
                 isShuffling ? 'opacity-50 cursor-not-allowed' : ''
               }`}
             >
@@ -224,7 +224,7 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
             <button
               onClick={handleRotation}
               disabled={categoryRoles.length === 0}
-              className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-sm border border-slate-700 transition"
+              className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-elevated hover:bg-hover text-ink font-bold text-sm border border-line-strong transition"
             >
               <RotateCw className="w-4 h-4 text-emerald-400" />
               <span>🔄 1칸 순환 배정</span>
@@ -232,7 +232,7 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
 
             <button
               onClick={handleClearCategoryAssignments}
-              className="p-3 rounded-2xl bg-slate-800/80 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 border border-slate-700 transition"
+              className="p-3 rounded-2xl bg-elevated/80 hover:bg-rose-500/20 text-muted hover:text-rose-400 border border-line-strong transition"
               title="이 카테고리 배정 전체 초기화"
             >
               <Trash2 className="w-5 h-5" />
@@ -245,13 +245,13 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
         {/* Student List */}
-        <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-            <h3 className="text-lg font-bold text-white flex items-center gap-2">
-              <UserCheck className="w-5 h-5 text-indigo-400" />
+        <div className="p-6 rounded-3xl bg-surface border border-line shadow-xl space-y-4">
+          <div className="flex items-center justify-between pb-4 border-b border-line">
+            <h3 className="text-lg font-bold text-ink flex items-center gap-2">
+              <UserCheck className="w-5 h-5 text-accent-text" />
               학생 명단 ({students.length}명)
             </h3>
-            <span className="text-xs text-slate-400">클릭하여 수동 배정</span>
+            <span className="text-xs text-muted">클릭하여 수동 배정</span>
           </div>
 
           <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
@@ -268,20 +268,20 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
                   onClick={() => setSelectedStudentId(isSelected ? null : student.id)}
                   className={`p-3.5 rounded-2xl border cursor-pointer transition-all flex items-center justify-between ${
                     isSelected
-                      ? 'bg-indigo-600/30 border-indigo-500 shadow-md ring-1 ring-indigo-500'
+                      ? 'bg-accent/30 border-accent-soft shadow-md ring-1 ring-accent'
                       : current
-                      ? 'bg-slate-800/50 border-slate-800 hover:border-slate-700'
+                      ? 'bg-elevated/50 border-line hover:border-line-strong'
                       : 'bg-amber-500/10 border-amber-500/20 text-amber-200'
                   }`}
                 >
                   <div className="flex items-center gap-3">
-                    <span className="text-xs font-bold text-slate-500 w-6">{student.number}번</span>
-                    <span className="font-bold text-slate-100">{student.name}</span>
+                    <span className="text-xs font-bold text-faint w-6">{student.number}번</span>
+                    <span className="font-bold text-ink">{student.name}</span>
                   </div>
 
                   <div className="flex items-center gap-2">
                     {assignedRole ? (
-                      <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-800 text-xs font-bold text-indigo-300 border border-slate-700">
+                      <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-elevated text-xs font-bold text-accent-text border border-line-strong">
                         <RoleIcon name={assignedRole.icon} className="w-3.5 h-3.5" />
                         <span>{assignedRole.title}</span>
                         {heldCount > 1 && (
@@ -308,7 +308,7 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
                         className={`p-1.5 rounded-lg transition ${
                           current.locked
                             ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                            : 'text-slate-500 hover:text-slate-300'
+                            : 'text-faint hover:text-muted'
                         }`}
                         title={current.locked ? '배정 고정됨' : '배정 고정하기'}
                       >
@@ -324,13 +324,13 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
 
         {/* Category Roles */}
         <div className="lg:col-span-2 space-y-4">
-          <div className="flex items-center justify-between p-4 rounded-2xl bg-slate-900 border border-slate-800">
-            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+          <div className="flex items-center justify-between p-4 rounded-2xl bg-surface border border-line">
+            <h3 className="text-lg font-bold text-ink flex items-center gap-2">
               <Lock className="w-5 h-5 text-emerald-400" />
               [{categoryConfig.name}] 역할별 배정 현황
             </h3>
             {selectedStudentId && (
-              <span className="text-xs font-bold px-3 py-1 rounded-full bg-indigo-600 text-white animate-pulse">
+              <span className="text-xs font-bold px-3 py-1 rounded-full bg-accent text-white animate-pulse">
                 {students.find((s) => s.id === selectedStudentId)?.name} 학생 배정할 역할 선택 중...
               </span>
             )}
@@ -349,8 +349,8 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
                     key={role.id}
                     className={`p-5 rounded-3xl border transition-all ${
                       selectedStudentId
-                        ? 'bg-slate-900 border-indigo-500/40 hover:border-indigo-500 hover:scale-[1.01] cursor-pointer'
-                        : 'bg-slate-900 border-slate-800'
+                        ? 'bg-surface border-accent-soft/40 hover:border-accent-soft hover:scale-[1.01] cursor-pointer'
+                        : 'bg-surface border-line'
                     }`}
                     onClick={() => {
                       if (selectedStudentId) {
@@ -360,12 +360,12 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
                   >
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-3">
-                        <div className="p-2.5 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                        <div className="p-2.5 rounded-2xl bg-accent-soft/10 text-accent-text border border-accent-soft/20">
                           <RoleIcon name={role.icon} className="w-5 h-5" />
                         </div>
                         <div>
-                          <h4 className="font-bold text-white">{role.title}</h4>
-                          <span className="text-xs text-slate-400">필요 인원: {role.count}명</span>
+                          <h4 className="font-bold text-ink">{role.title}</h4>
+                          <span className="text-xs text-muted">필요 인원: {role.count}명</span>
                         </div>
                       </div>
 
@@ -378,9 +378,9 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
                       </span>
                     </div>
 
-                    <p className="text-xs text-slate-400 mb-3 line-clamp-2">{role.description}</p>
+                    <p className="text-xs text-muted mb-3 line-clamp-2">{role.description}</p>
 
-                    <div className="flex flex-wrap gap-2 pt-3 border-t border-slate-800">
+                    <div className="flex flex-wrap gap-2 pt-3 border-t border-line">
                       {assignedStudents.length > 0 ? (
                         assignedStudents.map((st) => {
                           const isLocked = assignmentMap.get(st.id)?.locked;
@@ -390,7 +390,7 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
                               className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold border ${
                                 isLocked
                                   ? 'bg-amber-500/20 text-amber-200 border-amber-500/40'
-                                  : 'bg-slate-800 text-slate-200 border-slate-700'
+                                  : 'bg-elevated text-ink border-line-strong'
                               }`}
                             >
                               <span>{st.name}</span>
@@ -399,7 +399,7 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
                           );
                         })
                       ) : (
-                        <span className="text-xs text-slate-500 italic">배정된 학생 없음</span>
+                        <span className="text-xs text-faint italic">배정된 학생 없음</span>
                       )}
                     </div>
                   </div>
@@ -407,7 +407,7 @@ export const AssignmentEngine: React.FC<AssignmentEngineProps> = ({
               })}
             </div>
           ) : (
-            <div className="text-center py-16 bg-slate-900/60 rounded-3xl border border-slate-800 text-slate-400 text-sm">
+            <div className="text-center py-16 bg-surface/60 rounded-3xl border border-line text-muted text-sm">
               이 범주({categoryConfig.name})에 등록된 역할이 없습니다. [교사 설정] -&gt; [역할 목록]에서 새 역할을 추가해 주세요.
             </div>
           )}
